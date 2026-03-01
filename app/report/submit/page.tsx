@@ -79,14 +79,14 @@ function SubmitReportContent() {
 
   todayReports.forEach(r => {
     totalTechFee += Number(r.技術料) || 0;
-    // 「計」は修理金額と販売金額の合計
+    // 計は「修理金額 ＋ 販売金額」
     totalAmount += (Number(r.修理金額) || 0) + (Number(r.販売金額) || 0);
   });
 
-  // ★ 追加: 取得したレポートを「開始時間」で時系列（昇順）に並び替える
+  // 取得したレポートを「開始時間」で時系列（昇順）に並び替える
   const sortedReports = [...todayReports].sort((a, b) => {
-    const timeA = a.開始時間 ? formatTime(a.開始時間) : "99:99"; // 時間未定は一番下へ
-    const timeB = b.開始時間 ? formatTime(b.開始時間) : "99:99";
+    const timeA = extractTime(a.開始時間);
+    const timeB = extractTime(b.開始時間);
     return timeA.localeCompare(timeB);
   });
 
@@ -130,6 +130,20 @@ function SubmitReportContent() {
   const days = ['日', '月', '火', '水', '木', '金', '土'];
   const dayStr = days[d.getDay()];
 
+  // 時間ソート用の補助関数
+  function extractTime(timeStr: string) {
+    if (!timeStr) return "99:99"; 
+    if (/^\d{1,2}:\d{2}$/.test(timeStr)) return timeStr;
+    const match = timeStr.match(/T(\d{2}:\d{2})/);
+    if (match) return match[1];
+    return "99:99";
+  }
+
+  function formatDisplayTime(timeStr: string) {
+    const t = extractTime(timeStr);
+    return t === "99:99" ? "未定" : t;
+  }
+
   return (
     <div className="min-h-screen bg-[#f8f6f0] p-1.5 sm:p-3 flex flex-col font-sans text-slate-800 pb-2">
       
@@ -169,9 +183,9 @@ function SubmitReportContent() {
         
         {/* テーブルヘッダー */}
         <div className="flex text-[9px] text-gray-400 font-bold border-b border-gray-100 pb-1 pt-0.5 mb-1 px-1">
-          <div className="w-[35px] text-center">時間</div>
+          <div className="w-[38px] text-center shrink-0">時間</div>
           <div className="flex-1 pl-1">訪問先 / 内容</div>
-          <div className="w-[50px] text-right">技術/計</div>
+          <div className="w-[50px] text-right shrink-0">技術/計</div>
         </div>
 
         {sortedReports.length === 0 && (
@@ -183,30 +197,30 @@ function SubmitReportContent() {
 
         {/* データ一覧 */}
         {sortedReports.map((r, index) => {
-          // ★ 追加: 成約（販売）と遠隔の判定
-          const isSale = r.作業区分 === '販売';
+          // ★ 修正: A-2の定義に基づき、正しい条件で判定
+          const isSeiyaku = r.メモ ? r.メモ.includes('成約') : false; 
           const isRemote = r.遠隔高速利用 === '有';
 
-          // 枠線のスタイルを決定
-          const wrapperClass = isSale 
+          // 枠線のスタイルを決定（成約なら虹色、遠隔のみなら青色）
+          const wrapperClass = isSeiyaku 
             ? "bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 p-[1.5px] shadow-sm" // 虹色枠
             : isRemote 
-            ? "bg-blue-400 p-[1.5px] shadow-sm" // 青色枠
+            ? "bg-[#6495ED] p-[1.5px] shadow-sm" // 青色枠
             : "border-b border-gray-100"; // 通常の線
 
-          const innerClass = (isSale || isRemote) ? "bg-white rounded-[4px]" : "bg-transparent";
+          const innerClass = (isSeiyaku || isRemote) ? "bg-white rounded-[4px]" : "bg-transparent";
 
           return (
             <div key={index} className={`mb-[3px] rounded-[6px] ${wrapperClass}`}>
               <div className={`flex items-start py-1 px-1 ${innerClass}`}>
                 
-                {/* 時間 */}
-                <div className="w-[35px] text-[9px] text-gray-500 text-center font-bold leading-[1.1] pt-0.5">
-                  {formatTime(r.開始時間)}<br/>
-                  <span className="text-gray-400 text-[8px]">{formatTime(r.終了時間)}</span>
+                {/* 時間（文字が潰れないようにshrink-0で固定） */}
+                <div className="w-[38px] text-[10px] text-gray-500 text-center font-bold leading-[1.1] pt-0.5 shrink-0">
+                  {formatDisplayTime(r.開始時間)}<br/>
+                  <span className="text-gray-400 text-[8px]">{formatDisplayTime(r.終了時間)}</span>
                 </div>
                 
-                {/* 内容 */}
+                {/* 内容（文字がはみ出たら省略されるようにtruncateを使用） */}
                 <div className="flex-1 pl-1.5 pr-1 overflow-hidden">
                   <div className="flex items-center gap-1 mb-[2px]">
                     <span className="text-[11px] font-black text-gray-800 truncate leading-none pt-0.5">{r.訪問先}</span>
@@ -218,15 +232,15 @@ function SubmitReportContent() {
                     {r.品目} {r.品番 ? `(${r.品番})` : ''} / {r.依頼内容}
                   </div>
                   
-                  {/* ★ 追加: バッジエリア */}
+                  {/* バッジエリア */}
                   <div className="flex flex-wrap gap-1 mt-[2px]">
-                    {isSale && (
-                      <span className="text-[7.5px] text-white font-bold bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 px-1 py-[1.5px] rounded-[2px] leading-none shadow-sm">
+                    {isSeiyaku && (
+                      <span className="text-[7.5px] text-white font-bold bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 px-1.5 py-[1.5px] rounded-[2px] leading-none shadow-sm">
                         成約
                       </span>
                     )}
                     {isRemote && (
-                      <span className="text-[7.5px] text-white font-bold bg-blue-500 px-1 py-[1.5px] rounded-[2px] leading-none shadow-sm">
+                      <span className="text-[7.5px] text-white font-bold bg-[#6495ED] px-1.5 py-[1.5px] rounded-[2px] leading-none shadow-sm">
                         遠隔
                       </span>
                     )}
@@ -238,10 +252,10 @@ function SubmitReportContent() {
                   </div>
                 </div>
                 
-                {/* 金額 */}
-                <div className="w-[50px] text-right flex flex-col justify-center pr-1 pt-0.5">
+                {/* 金額（文字が潰れないようにshrink-0で固定） */}
+                <div className="w-[50px] text-right flex flex-col justify-center pr-1 pt-0.5 shrink-0">
                   <div className="text-[8px] text-gray-400 font-bold leading-[1.1] mb-[1px]">¥{Number(r.技術料).toLocaleString()}</div>
-                  <div className={`text-[10px] font-black leading-[1.1] ${isSale ? 'text-[#d98c77]' : 'text-[#547b97]'}`}>
+                  <div className={`text-[10px] font-black leading-[1.1] ${r.作業区分 === '販売' ? 'text-[#d98c77]' : 'text-[#547b97]'}`}>
                     ¥{(Number(r.修理金額) + Number(r.販売金額)).toLocaleString()}
                   </div>
                 </div>
@@ -273,7 +287,6 @@ function SubmitReportContent() {
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-[24px] w-full max-w-sm p-8 flex flex-col items-center text-center shadow-2xl transform transition-all scale-100">
             
-            {/* アニメーション付きのアイコン */}
             <div className="text-6xl mb-4 animate-bounce drop-shadow-sm">
               🎉
             </div>
