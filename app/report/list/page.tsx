@@ -33,7 +33,6 @@ const extractTimeForInput = (timeStr: string) => {
     const d = new Date(timeStr);
     if (!isNaN(d.getTime())) return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
   }
-  // すでに HH:mm の場合
   if (/^\d{1,2}:\d{2}/.test(timeStr)) {
     const [h, m] = timeStr.split(':');
     return `${h.padStart(2, '0')}:${m}`;
@@ -65,6 +64,10 @@ function ReportList() {
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+
+  // ★ 追加: 削除確認モーダル用のステート
+  const [itemToDelete, setItemToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // データ取得処理
   const fetchData = useCallback(async () => {
@@ -151,13 +154,42 @@ function ReportList() {
         body: formBody,
       });
 
-      // 保存成功後、モーダルを閉じてデータを再取得
       setEditingItem(null);
       await fetchData();
     } catch (error) {
       setSubmitMessage("通信エラーが発生しました。");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // ★ 追加: 削除を実行するハンドラー
+  const handleDeleteSubmit = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
+
+    const payload = {
+      タイムスタンプ: itemToDelete.タイムスタンプ,
+      action: 'delete' // GASに「削除」を指示
+    };
+
+    try {
+      const formBody = new URLSearchParams();
+      formBody.append('data', JSON.stringify(payload));
+
+      await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formBody,
+      });
+
+      // 削除成功後、モーダルを閉じてデータを再取得
+      setItemToDelete(null);
+      await fetchData();
+    } catch (error) {
+      alert("削除中にエラーが発生しました。もう一度お試しください。");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -316,8 +348,19 @@ function ReportList() {
                         </div>
                       )}
 
-                      {/* 編集ボタン */}
-                      <div className="pt-2 flex justify-end">
+                      {/* ★ 変更: 下部ボタンエリア（削除ボタン ＆ 編集ボタン） */}
+                      <div className="pt-2 flex justify-between items-center">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setItemToDelete(item);
+                          }}
+                          className="flex items-center gap-1 px-3 py-2 rounded-lg font-bold text-xs text-red-500 hover:bg-red-50 active:scale-95 transition-all"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          削除
+                        </button>
+
                         <button 
                           onClick={(e) => openEditModal(e, item)}
                           className={`flex items-center gap-1 px-4 py-2 rounded-lg font-bold text-xs shadow-sm active:scale-95 transition-transform ${isHighway ? 'bg-blue-600 text-white border-none' : 'bg-white border border-gray-200 text-gray-600'}`}
@@ -326,6 +369,7 @@ function ReportList() {
                           内容を編集する
                         </button>
                       </div>
+
                     </div>
                   )}
 
@@ -335,6 +379,46 @@ function ReportList() {
           })
         )}
       </div>
+
+      {/* =========================================
+          ★ 追加: 削除確認モーダル（ストッパー）
+      ========================================= */}
+      {itemToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[120] flex items-center justify-center p-4 animate-fade-in" onClick={() => setItemToDelete(null)}>
+          <div className="bg-white rounded-[24px] w-full max-w-sm p-6 flex flex-col items-center text-center shadow-2xl transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+              </svg>
+            </div>
+
+            <h3 className="text-lg font-black text-gray-800 mb-2">この案件を削除しますか？</h3>
+            <p className="text-xs text-gray-500 font-medium mb-2 bg-gray-50 p-3 rounded-xl w-full border border-gray-100">
+              {itemToDelete.訪問先}<br/>
+              {itemToDelete.品目} / {itemToDelete.依頼内容}
+            </p>
+            <p className="text-[10px] text-red-500 font-bold mb-6">※この操作は取り消せません。スプレッドシートからも完全に削除されます。</p>
+
+            <div className="w-full flex gap-3">
+              <button 
+                onClick={() => setItemToDelete(null)} 
+                className="flex-1 bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold active:scale-95 transition-transform"
+              >
+                キャンセル
+              </button>
+              <button 
+                onClick={handleDeleteSubmit} 
+                disabled={isDeleting}
+                className="flex-1 bg-red-500 text-white py-3.5 rounded-xl font-bold tracking-widest active:scale-95 transition-transform shadow-md disabled:bg-gray-300"
+              >
+                {isDeleting ? '削除中...' : '削除する'}
+              </button>
+            </div>
+            
+          </div>
+        </div>
+      )}
 
       {/* =========================================
           フルスクリーン エディット（編集）モーダル 
