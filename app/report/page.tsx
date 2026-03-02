@@ -16,10 +16,10 @@ const extractDateForInput = (dateStr: string) => {
   return dateStr;
 };
 
-// ★ 追加: 担当者リスト（前田さんを追加し、共通化）
+// 担当者リスト（前田さんを追加し、共通化）
 const ASSIGNEES = ["佐藤", "田中", "南", "新田", "德重", "前田"];
 
-// ★ 追加: お知らせのデータ型を定義
+// お知らせのデータ型を定義
 type Notice = {
   id: string;
   date: string;
@@ -63,11 +63,10 @@ function ReportHub() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         
-        // ★ 変更: GASが配列(複数)を返してきた場合と、旧型式(単一)を返してきた場合の両方に対応
         if (Array.isArray(data)) {
           setNotices(data);
         } else if (data && typeof data.isActive !== 'undefined') {
-          // 旧型式のデータへのフォールバック（GAS修正前でもエラーにならないようにする）
+          // 旧型式のデータへのフォールバック
           setNotices([{
             id: 'legacy-1',
             date: new Date().toLocaleDateString('ja-JP'),
@@ -78,7 +77,6 @@ function ReportHub() {
           }]);
         }
         
-        // アクティブなお知らせがあれば、起動時にパネルをお知らせに合わせる
         const hasActive = Array.isArray(data) ? data.some(n => n.isActive) : data.isActive;
         if (hasActive) {
           setActiveIndex(0);
@@ -135,12 +133,12 @@ function ReportHub() {
     if (distance < -minSwipeDistance && activeIndex > 0) setActiveIndex(prev => prev - 1);
   };
 
-  // ★ 追加: 新しいお知らせの保存（GASへ送信）
+  // 新しいお知らせの保存（GASへ送信）
   const handleSaveNoticesToGAS = async (newNotices: Notice[]) => {
     setIsSavingNotice(true);
     try {
       const payload = {
-        action: 'updateNotices', // GAS側で受け取る新しいアクション名
+        action: 'updateNotices', 
         notices: newNotices
       };
       const formBody = new URLSearchParams();
@@ -252,10 +250,11 @@ function ReportHub() {
           </Link>
 
           <div className="bg-white border border-gray-100 rounded-full px-5 py-2.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex items-center relative w-[160px] z-20">
+            {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
             <select 
               value={assignee}
               onChange={handleAssigneeChange}
-              className="bg-transparent font-black text-slate-800 outline-none appearance-none cursor-pointer w-full text-sm z-10 text-center"
+              className="bg-transparent font-black text-slate-800 outline-none appearance-none cursor-pointer w-full text-base z-10 text-center"
             >
               <option value="">担当者選択</option>
               {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
@@ -268,7 +267,6 @@ function ReportHub() {
 
       {/* メニューカード一覧 */}
       <div className="grid grid-cols-2 gap-4 w-[92%] max-w-md mb-8 z-20 relative">
-        {/* ... (A-1〜A-4のボタンはそのまま) ... */}
         <Link href={`/report/new${getQueryString()}`} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform border border-transparent hover:border-orange-100">
           <h2 className="text-[1.2rem] font-black text-gray-900 tracking-widest mb-1">新規入力</h2>
           <p className="text-[10px] text-gray-400 font-medium mb-3">A-1</p>
@@ -296,11 +294,9 @@ function ReportHub() {
         <div className="overflow-hidden w-full pb-2" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div className="flex transition-transform duration-300 ease-out w-[300%] items-stretch" style={{ transform: `translateX(-${activeIndex * (100 / 3)}%)` }}>
             
-            {/* 0: ★ 新・お知らせパネル */}
+            {/* 0: 新・お知らせパネル */}
             <div className="w-1/3 px-1.5 h-64">
               <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-4 h-full flex flex-col relative overflow-hidden">
-                
-                {/* ヘッダーエリア */}
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-[#eaaa43] font-black text-sm tracking-widest flex items-center">
                     📢 お知らせ
@@ -321,7 +317,6 @@ function ReportHub() {
                       </div>
                     ) : (
                       <>
-                        {/* 🚨 至急フラグのものを全てフル表示 */}
                         {urgentNotices.map(notice => (
                           <div key={notice.id} className="bg-red-50 border border-red-200 rounded-xl p-3 shadow-sm relative">
                             <div className="flex items-center gap-1.5 mb-1">
@@ -332,7 +327,6 @@ function ReportHub() {
                           </div>
                         ))}
 
-                        {/* ⚪️ 通常のお知らせの表示ロジック */}
                         {urgentNotices.length === 0 && normalNotices.length > 0 && (
                           <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 shadow-sm relative">
                             <div className="flex items-center gap-1.5 mb-1">
@@ -342,7 +336,6 @@ function ReportHub() {
                           </div>
                         )}
                         
-                        {/* ＋他〇件 リンク */}
                         {((urgentNotices.length > 0 && normalNotices.length > 0) || (urgentNotices.length === 0 && normalNotices.length > 1)) && (
                           <div className="text-right mt-1 pb-1">
                             <span className="text-[10px] text-[#eaaa43] font-black bg-orange-50 px-2 py-1 rounded-full border border-orange-100">
@@ -357,10 +350,9 @@ function ReportHub() {
               </div>
             </div>
 
-            {/* 1: たったできることパネル (変更なし) */}
+            {/* 1: たったできることパネル */}
             <div className="w-1/3 px-1.5 h-64">
               <div onClick={() => openModal('todo')} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-5 h-full flex flex-col justify-center cursor-pointer active:scale-[0.98] transition-transform">
-                 {/* 中身は元のまま */}
                  <div className="flex items-center justify-center mb-5 pointer-events-none">
                   <h3 className="text-gray-800 font-black text-base tracking-widest relative inline-block">
                     たったできること
@@ -384,7 +376,7 @@ function ReportHub() {
               </div>
             </div>
 
-            {/* 2: リアルタイム集計パネル (変更なし) */}
+            {/* 2: リアルタイム集計パネル */}
             <div className="w-1/3 px-1.5 h-64">
               <div onClick={(e) => { if ((e.target as HTMLElement).tagName !== 'BUTTON') openModal('summary'); }} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-5 h-full flex flex-col justify-center cursor-pointer active:scale-[0.98] transition-transform">
                 <div className="flex items-center justify-between mb-4 pointer-events-none">
@@ -510,10 +502,11 @@ function ReportHub() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[10px] font-bold text-gray-500 mb-1">担当者 (投稿者)</label>
+                          {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
                           <select 
                             value={editingNotice.author} 
                             onChange={e => setEditingNotice({...editingNotice, author: e.target.value})}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-[#eaaa43]"
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base font-bold text-gray-700 outline-none focus:border-[#eaaa43]"
                           >
                             {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
                           </select>
@@ -539,10 +532,11 @@ function ReportHub() {
 
                       <div>
                         <label className="block text-[10px] font-bold text-gray-500 mb-1">お知らせ内容</label>
+                        {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
                         <textarea 
                           value={editingNotice.text}
                           onChange={(e) => setEditingNotice({...editingNotice, text: e.target.value})}
-                          className="w-full text-sm p-4 border border-gray-200 rounded-xl outline-none focus:border-[#eaaa43] resize-none h-40 bg-gray-50"
+                          className="w-full text-base p-4 border border-gray-200 rounded-xl outline-none focus:border-[#eaaa43] resize-none h-40 bg-gray-50"
                           placeholder="全スタッフへのお知らせ内容を入力してください..."
                         />
                       </div>
