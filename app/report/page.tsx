@@ -16,6 +16,17 @@ const extractDateForInput = (dateStr: string) => {
   return dateStr;
 };
 
+// ★ 日付表示を綺麗にする関数を追加
+const formatDateForDisplay = (dateStr: string) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  }
+  // そのままの文字列（"2026/03/01" などで直接入っていた場合）
+  return dateStr;
+};
+
 // 担当者リスト（前田さんを追加し、共通化）
 const ASSIGNEES = ["佐藤", "田中", "南", "新田", "德重", "前田"];
 
@@ -27,6 +38,8 @@ type Notice = {
   isUrgent: boolean;
   text: string;
   isActive: boolean;
+  // ★ 追加: 確認した人のリストを保持する配列
+  confirmedBy?: string[]; 
 };
 
 function ReportHub() {
@@ -64,7 +77,12 @@ function ReportHub() {
         const data = await res.json();
         
         if (Array.isArray(data)) {
-          setNotices(data);
+          // ★ 追加: GASから受け取る際、カンマ区切りの文字列を配列に戻す処理を考慮
+          const formattedData = data.map(n => ({
+            ...n,
+            confirmedBy: n.confirmedBy ? (typeof n.confirmedBy === 'string' ? n.confirmedBy.split(',').filter(Boolean) : n.confirmedBy) : []
+          }));
+          setNotices(formattedData);
         } else if (data && typeof data.isActive !== 'undefined') {
           // 旧型式のデータへのフォールバック
           setNotices([{
@@ -73,7 +91,8 @@ function ReportHub() {
             author: '事務局',
             isUrgent: false,
             text: data.text || '',
-            isActive: data.isActive
+            isActive: data.isActive,
+            confirmedBy: [] // 初期値
           }]);
         }
         
@@ -134,12 +153,18 @@ function ReportHub() {
   };
 
   // 新しいお知らせの保存（GASへ送信）
-  const handleSaveNoticesToGAS = async (newNotices: Notice[]) => {
+  const handleSaveNoticesToGAS = async (newNotices: Notice[], isSilent = false) => {
     setIsSavingNotice(true);
     try {
+      // GAS側で配列として保存しやすいように、confirmedBy をカンマ区切り文字列に変換しておく
+      const gasPayload = newNotices.map(n => ({
+        ...n,
+        confirmedBy: Array.isArray(n.confirmedBy) ? n.confirmedBy.join(',') : ''
+      }));
+
       const payload = {
         action: 'updateNotices', 
-        notices: newNotices
+        notices: gasPayload
       };
       const formBody = new URLSearchParams();
       formBody.append('data', JSON.stringify(payload));
@@ -152,9 +177,13 @@ function ReportHub() {
 
       setNotices(newNotices);
       setEditingNotice(null);
-      alert("お知らせを保存しました！");
+      if (!isSilent) {
+        alert("保存しました！");
+      }
     } catch (error) {
-      alert("通信エラーが発生しました。");
+      if (!isSilent) {
+        alert("通信エラーが発生しました。");
+      }
     } finally {
       setIsSavingNotice(false);
     }
@@ -171,7 +200,8 @@ function ReportHub() {
         author: assignee !== 'add' && assignee !== '' ? assignee : '前田',
         isUrgent: false,
         text: '',
-        isActive: true
+        isActive: true,
+        confirmedBy: [] // 新規作成時は空
       });
     }
   };
@@ -183,6 +213,31 @@ function ReportHub() {
       handleSaveNoticesToGAS(newNotices);
     }
   };
+
+  // ★ 追加: 「確認しました」ボタンを押した時の処理
+  const handleConfirmNotice = (noticeId: string) => {
+    // 担当者が選ばれていない場合は警告
+    if (!assignee || assignee === 'add') {
+      alert("トップ画面であなたの名前（担当者）を選択してから確認ボタンを押してください。");
+      return;
+    }
+
+    if (confirm(`${assignee}さん、確認バッジをつけてよろしいですか？`)) {
+      // 対象のお知らせを探し、confirmedBy 配列に自分の名前を追加
+      const newNotices = notices.map(n => {
+        if (n.id === noticeId) {
+          const currentConfirmers = n.confirmedBy || [];
+          if (!currentConfirmers.includes(assignee)) {
+            return { ...n, confirmedBy: [...currentConfirmers, assignee] };
+          }
+        }
+        return n;
+      });
+      // GASに送信（isSilent=true にして、完了時の「保存しました」アラートを出さない）
+      handleSaveNoticesToGAS(newNotices, true);
+    }
+  };
+
 
   const openModal = (modalName: string) => {
     router.push(`?modal=${modalName}`, { scroll: false });
@@ -250,7 +305,6 @@ function ReportHub() {
           </Link>
 
           <div className="bg-white border border-gray-100 rounded-full px-5 py-2.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex items-center relative w-[160px] z-20">
-            {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
             <select 
               value={assignee}
               onChange={handleAssigneeChange}
@@ -468,22 +522,64 @@ function ReportHub() {
                 {activeNotices.length === 0 ? (
                   <div className="text-center py-10 text-gray-400 font-bold">現在、表示するお知らせはありません。</div>
                 ) : (
-                  activeNotices.sort((a, b) => (a.isUrgent === b.isUrgent) ? 0 : a.isUrgent ? -1 : 1).map(notice => (
-                    <div key={notice.id} className={`bg-white rounded-[20px] shadow-sm p-5 border-l-4 ${notice.isUrgent ? 'border-red-500' : 'border-[#eaaa43]'}`}>
-                      <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
-                        <div className="flex items-center gap-2">
-                          {notice.isUrgent ? (
-                            <span className="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded shadow-sm">🚨 至急確認</span>
-                          ) : (
-                            <span className="text-xl">📢</span>
-                          )}
-                          <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded">👤 {notice.author}</span>
+                  activeNotices.sort((a, b) => (a.isUrgent === b.isUrgent) ? 0 : a.isUrgent ? -1 : 1).map(notice => {
+                    // 自分が既に確認済みかどうかを判定
+                    const isConfirmedByMe = notice.confirmedBy?.includes(assignee);
+
+                    return (
+                      <div key={notice.id} className={`bg-white rounded-[20px] shadow-sm border-l-4 ${notice.isUrgent ? 'border-red-500' : 'border-[#eaaa43]'} overflow-hidden`}>
+                        <div className="p-5 pb-4">
+                          <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-3">
+                            <div className="flex items-center gap-2">
+                              {notice.isUrgent ? (
+                                <span className="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded shadow-sm">🚨 至急確認</span>
+                              ) : (
+                                <span className="text-xl">📢</span>
+                              )}
+                              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded">👤 {notice.author}</span>
+                            </div>
+                            {/* ★ 修正: 時間を綺麗にフォーマット */}
+                            <span className="text-[10px] text-gray-400 font-bold mt-1">{formatDateForDisplay(notice.date)}</span>
+                          </div>
+                          <p className="text-sm text-gray-800 font-bold leading-relaxed whitespace-pre-wrap">{notice.text}</p>
                         </div>
-                        <span className="text-[10px] text-gray-400 font-bold">{notice.date}</span>
+                        
+                        {/* ★ 追加: 確認ボタンとバッジエリア */}
+                        <div className="bg-gray-50 p-4 border-t border-gray-100 flex flex-col gap-3">
+                          
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-gray-400 tracking-wider">確認状況</span>
+                            
+                            {/* 右上の「確認する」ボタン（リッチデザイン） */}
+                            {!isConfirmedByMe && (
+                              <button 
+                                onClick={() => handleConfirmNotice(notice.id)}
+                                disabled={isSavingNotice}
+                                className="flex items-center gap-1.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-2 rounded-full font-black text-xs shadow-md active:scale-95 transition-transform hover:shadow-lg disabled:opacity-50"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                確認しました
+                              </button>
+                            )}
+                          </div>
+
+                          {/* 確認済みバッジ（丸みを帯びたカラフルなデザイン） */}
+                          <div className="flex flex-wrap gap-2">
+                            {(!notice.confirmedBy || notice.confirmedBy.length === 0) ? (
+                              <span className="text-[10px] text-gray-400 font-medium">まだ確認者がいません</span>
+                            ) : (
+                              notice.confirmedBy.map((name, idx) => (
+                                <span key={idx} className="flex items-center gap-1 bg-white border border-green-200 text-green-700 px-2.5 py-1 rounded-full text-[10px] font-bold shadow-sm">
+                                  <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                  {name}
+                                </span>
+                              ))
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <p className="text-sm text-gray-800 font-bold leading-relaxed whitespace-pre-wrap">{notice.text}</p>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -502,7 +598,6 @@ function ReportHub() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[10px] font-bold text-gray-500 mb-1">担当者 (投稿者)</label>
-                          {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
                           <select 
                             value={editingNotice.author} 
                             onChange={e => setEditingNotice({...editingNotice, author: e.target.value})}
@@ -532,7 +627,6 @@ function ReportHub() {
 
                       <div>
                         <label className="block text-[10px] font-bold text-gray-500 mb-1">お知らせ内容</label>
-                        {/* ★ 修正: 勝手にズームしないように text-sm を text-base に変更 */}
                         <textarea 
                           value={editingNotice.text}
                           onChange={(e) => setEditingNotice({...editingNotice, text: e.target.value})}
@@ -578,7 +672,7 @@ function ReportHub() {
                                   {notice.isActive ? 'ON 表示中' : 'OFF 非表示'}
                                 </span>
                                 {notice.isUrgent && <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">🚨 至急</span>}
-                                <span className="text-[10px] text-gray-400 font-bold ml-1">{notice.date}</span>
+                                <span className="text-[10px] text-gray-400 font-bold ml-1">{formatDateForDisplay(notice.date)}</span>
                               </div>
                             </div>
                             <p className="text-xs text-gray-700 font-bold line-clamp-2 mb-3 leading-relaxed">{notice.text}</p>
@@ -598,7 +692,7 @@ function ReportHub() {
               </div>
             )}
 
-            {/* --- たったできることモーダル (変更なし) --- */}
+            {/* --- たったできることモーダル --- */}
             {activeModal === 'todo' && (
               <div className="space-y-4">
                 <div className="bg-white rounded-[20px] shadow-sm p-6 border-l-4 border-[#eaaa43]">
@@ -620,7 +714,7 @@ function ReportHub() {
               </div>
             )}
 
-            {/* --- 集計詳細モーダル (変更なし) --- */}
+            {/* --- 集計詳細モーダル --- */}
             {activeModal === 'summary' && (
               <div className="bg-white rounded-[20px] shadow-sm p-6">
                 <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
