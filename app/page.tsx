@@ -43,21 +43,21 @@ export default function Home() {
           <div className="w-[60%] max-w-[80px] h-[2px] bg-[#cba358]"></div>
         </Link>
 
-        {/* 2. 案件管理 (★変更: divをbuttonにし、onClickを追加) */}
+        {/* 2. 案件管理 */}
         <button onClick={handleComingSoon} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform">
           <h2 className="text-[1.3rem] font-black text-gray-900 tracking-widest mb-1">案件管理</h2>
           <p className="text-[11px] text-gray-400 font-medium mb-3">Project Management</p>
           <div className="w-[60%] max-w-[80px] h-[2px] bg-[#cba358]"></div>
         </button>
 
-        {/* 3. ホワイトボード (★変更: divをbuttonにし、onClickを追加) */}
-        <button onClick={handleComingSoon} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform">
+        {/* 3. ホワイトボード (★変更: Linkコンポーネントに差し替え、/whiteboard へ遷移) */}
+        <Link href="/whiteboard" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform">
           <h2 className="text-[1.1rem] font-black text-gray-900 tracking-widest mb-1">ホワイトボード</h2>
           <p className="text-[11px] text-gray-400 font-medium mb-3">Whiteboard</p>
           <div className="w-[60%] max-w-[80px] h-[2px] bg-[#cba358]"></div>
-        </button>
+        </Link>
 
-        {/* 4. 物品管理 (★変更: divをbuttonにし、onClickを追加) */}
+        {/* 4. 物品管理 */}
         <button onClick={handleComingSoon} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform">
           <h2 className="text-[1.3rem] font-black text-gray-900 tracking-widest mb-1">物品管理</h2>
           <p className="text-[11px] text-gray-400 font-medium mb-3">Inventory Management</p>
@@ -77,7 +77,7 @@ export default function Home() {
           </svg>
         </Link>
         
-        {/* お知らせ (★変更: onClickを追加) */}
+        {/* お知らせ */}
         <div onClick={handleComingSoon} className="p-2 cursor-pointer active:scale-90 transition-transform">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#b0b0b0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
@@ -85,7 +85,7 @@ export default function Home() {
           </svg>
         </div>
         
-        {/* ユーザー (★変更: onClickを追加) */}
+        {/* ユーザー */}
         <div onClick={handleComingSoon} className="p-2 cursor-pointer active:scale-90 transition-transform">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#b0b0b0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
@@ -93,7 +93,7 @@ export default function Home() {
           </svg>
         </div>
         
-        {/* 設定 (★変更: onClickを追加) */}
+        {/* 設定 */}
         <div onClick={handleComingSoon} className="p-2 cursor-pointer active:scale-90 transition-transform">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#b0b0b0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"/>
