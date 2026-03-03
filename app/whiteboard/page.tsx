@@ -38,11 +38,12 @@ function WhiteboardContent() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // ★ 編集(上書き)用に「タイムスタンプ」を追加
   const [formData, setFormData] = useState({
-    id: 0, 日付: getTodayString(), 開始時間: '', 終了時間: '', 担当者: '', 訪問先: '', エリア: '', クライアント: '', 品目: '', 品番: '', 依頼内容: '', 作業内容: '', 作業区分: '修理', 技術料: '0', 修理金額: '0', 販売金額: '0', 提案有無: '無', 提案内容: '', 遠隔高速利用: '無', 伝票番号: '', 状況: '未完了(予定)', メモ: '', 成約有無: '無', locationDetail: '', wbItem: '', wbItemDetail: ''
+    タイムスタンプ: '', 日付: getTodayString(), 開始時間: '', 終了時間: '', 担当者: '', 訪問先: '', エリア: '', クライアント: '', 品目: '', 品番: '', 依頼内容: '', 作業内容: '', 作業区分: '修理', 技術料: '0', 修理金額: '0', 販売金額: '0', 提案有無: '無', 提案内容: '', 遠隔高速利用: '無', 伝票番号: '', 状況: '未完了(予定)', メモ: '', 成約有無: '無', locationDetail: '', wbItem: '', wbItemDetail: ''
   });
 
-  // 初回マウント処理とGASからのデータ取得
+  // 初回データ取得
   useEffect(() => {
     setMounted(true);
     const savedWorker = localStorage.getItem('savedWorker');
@@ -52,20 +53,19 @@ function WhiteboardContent() {
     fetchSchedules();
   }, []);
 
-  // ★逆引き：GASからデータを取得してメモ欄からWB専用項目を復元
   const fetchSchedules = async () => {
     setIsLoading(true);
     try {
-      // type=whiteboard を指定して安全に取得
       const res = await fetch(GAS_URL + "?type=whiteboard");
       const data = await res.json();
       
-      const parsedData = data.map((row: any, index: number) => {
+      const parsedData = data.map((row: any) => {
         let locDetail = "";
         let wItem = "";
         let wItemDet = "";
         const memo = row.メモ || "";
         
+        // メモ欄からの抽出
         const match = memo.match(/【WB予定】場所:(.*?) \/ 品目:(.*?)(?:\n|$)/);
         if (match) {
           locDetail = match[1].trim();
@@ -74,6 +74,7 @@ function WhiteboardContent() {
           else { wItem = "その他"; wItemDet = parsedItem; }
         }
 
+        // 時間の整形
         let startTimeStr = row.開始時間 || "";
         let endTimeStr = row.終了時間 || "";
         if(startTimeStr.length > 5 && startTimeStr.includes('T')) {
@@ -86,7 +87,8 @@ function WhiteboardContent() {
         }
 
         return {
-          id: index + 1, 日付: row.日付 || "", 担当者: row.担当者 || "", 開始時間: startTimeStr, 終了時間: endTimeStr, 訪問先: row.訪問先 || "", 依頼内容: row.依頼内容 || "", 作業内容: row.作業内容 || "", メモ: row.メモ || "", locationDetail: locDetail, wbItem: wItem, wbItemDetail: wItemDet
+          タイムスタンプ: row.タイムスタンプ || "", // ★編集用のID
+          日付: row.日付 || "", 担当者: row.担当者 || "", 開始時間: startTimeStr, 終了時間: endTimeStr, 訪問先: row.訪問先 || "", 依頼内容: row.依頼内容 || "", 作業内容: row.作業内容 || "", メモ: row.メモ || "", locationDetail: locDetail, wbItem: wItem, wbItemDetail: wItemDet
         };
       });
       setSchedules(parsedData);
@@ -132,22 +134,37 @@ function WhiteboardContent() {
     setIsDetailOpen(true);
   };
 
+  // ★ 新規作成フォームを開く
   const openNewForm = () => {
     setFormData(prev => ({
-      ...prev, id: 0, 日付: dateString, 担当者: currentUser || assignees[0], 開始時間: '', 終了時間: '', 訪問先: '', locationDetail: '', wbItem: '', wbItemDetail: '', エリア: '', 依頼内容: '', 作業内容: '', メモ: ''
+      ...prev, タイムスタンプ: '', 日付: dateString, 担当者: currentUser || assignees[0], 開始時間: '', 終了時間: '', 訪問先: '', locationDetail: '', wbItem: '', wbItemDetail: '', エリア: '', 依頼内容: '', 作業内容: '', メモ: ''
     }));
     setIsFormOpen(true);
   };
 
+  // ★ 編集フォームを開く（詳細画面から）
+  const openEditForm = () => {
+    setFormData({
+      ...formData, ...selectedSchedule
+    });
+    setIsDetailOpen(false);
+    setIsFormOpen(true);
+  };
+
+  // ★ GASへPOST送信（新規作成 ＆ 上書き更新 の両対応）
   const handleSaveToGAS = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     const finalItem = formData.wbItem === 'その他' ? formData.wbItemDetail : formData.wbItem;
     const wbMarker = `【WB予定】場所:${formData.locationDetail} / 品目:${finalItem}`;
-    const combinedMemo = formData.メモ ? `${wbMarker}\n${formData.メモ}` : wbMarker;
+    // ※更新時は既存のメモから古いWBマーカーを消して付け直す処理が必要ですが、簡易的に上書きします
+    const baseMemo = formData.メモ.replace(/【WB予定】.*?(?:\n|$)/g, '').trim();
+    const combinedMemo = baseMemo ? `${wbMarker}\n${baseMemo}` : wbMarker;
 
     const payload = {
+      action: formData.タイムスタンプ ? 'update' : 'create', // ★ここが重要！
+      タイムスタンプ: formData.タイムスタンプ,
       日付: formData.日付, 開始時間: formData.開始時間, 終了時間: formData.終了時間, 担当者: formData.担当者, 訪問先: formData.訪問先, エリア: formData.エリア, クライアント: formData.クライアント, 品目: formData.品目, 品番: formData.品番, 依頼内容: formData.依頼内容, 作業内容: formData.作業内容, 作業区分: formData.作業区分, 技術料: 0, 修理金額: 0, 販売金額: 0, 提案有無: formData.提案有無, 提案内容: formData.提案内容, 遠隔高速利用: formData.遠隔高速利用, 伝票番号: formData.伝票番号, 状況: formData.状況, メモ: combinedMemo
     };
 
@@ -156,9 +173,9 @@ function WhiteboardContent() {
       formBody.append('data', JSON.stringify(payload));
 
       await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
-      alert("日報データベースへの事前登録が完了しました！");
+      alert(formData.タイムスタンプ ? "予定を更新しました！" : "予定を新規登録しました！");
       setIsFormOpen(false);
-      fetchSchedules(); // 送信後に自動リロード
+      fetchSchedules(); // 送信後に最新データをリロード
     } catch (error) {
       alert("通信エラーが発生しました。");
     } finally {
@@ -168,17 +185,17 @@ function WhiteboardContent() {
 
   if (!mounted) return <div className="min-h-screen bg-[#f8f6f0]" />;
 
-  // ★iOSズーム対策：text-[16px]を強制指定（これで画面が広がりません）
   const inputBaseClass = "w-full bg-white border border-gray-300 rounded-[10px] px-3 py-2.5 text-[16px] text-gray-800 focus:outline-none focus:border-[#eaaa43] transition-all appearance-none";
   const selectWrapperClass = "relative after:content-['▼'] after:text-gray-400 after:text-[10px] after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:pointer-events-none";
 
   const currentSchedules = schedules.filter(s => s.日付 === dateString);
 
   return (
-    <div className="min-h-screen bg-[#f8f6f0] font-sans text-slate-800 pb-32 flex flex-col">
+    // ★ 全体を固定レイアウト（h-screen）に変更し、内側だけスクロールさせる設計
+    <div className="h-screen bg-[#f8f6f0] font-sans text-slate-800 flex flex-col overflow-hidden">
       
-      {/* 1. ヘッダーエリア */}
-      <div className="sticky top-0 z-40 bg-[#f8f6f0] pt-4 pb-2 px-2 shadow-sm border-b border-gray-200">
+      {/* 1. トップナビゲーション（絶対に動かないエリア） */}
+      <div className="flex-none pt-4 pb-2 px-2 bg-[#f8f6f0] shadow-sm z-40 border-b border-gray-200 relative">
         <div className="max-w-md mx-auto flex flex-col gap-2">
           <div className="bg-gradient-to-r from-[#eaaa43] to-[#d4952b] rounded-xl py-2 px-4 shadow-sm flex items-center justify-between">
             <h1 className="text-white font-black tracking-widest text-sm">ホワイトボード</h1>
@@ -208,34 +225,34 @@ function WhiteboardContent() {
         </div>
       </div>
 
-      {/* 2. マトリクス表示エリア（1画面に7〜8件入る超コンパクト・固定ヘッダー） */}
-      <div className="flex-1 mt-2 px-1 max-w-md mx-auto w-full relative">
-        <div className="flex flex-row overflow-x-auto gap-1 pb-4 items-start w-full no-scrollbar">
+      {/* 2. マトリクス表示エリア（この中だけが上下左右にスクロールする） */}
+      <div className="flex-1 overflow-auto no-scrollbar relative bg-[#f8f6f0] pb-[80px] px-1">
+        <div className="flex flex-row gap-1 min-w-max pt-2">
           {assignees.map(assignee => {
             const personSchedules = currentSchedules.filter(s => s.担当者 === assignee).sort((a, b) => a.開始時間.localeCompare(b.開始時間));
             const style = staffStyles[assignee];
 
             return (
-              <div key={assignee} className="w-[23.5%] flex-shrink-0 flex flex-col">
-                {/* ★スタッフ名を一番上で完全に固定 */}
-                <div className={`${style.headerBg} rounded py-1 text-center shadow-sm mb-1 sticky top-[100px] z-30 border-b-2 ${style.border}`}>
+              <div key={assignee} className="w-[23vw] min-w-[80px] max-w-[95px] flex flex-col">
+                
+                {/* ★スタッフ名の完全固定ヘッダー（スクロールエリア内でsticky） */}
+                <div className={`sticky top-0 z-30 ${style.headerBg} rounded py-1 text-center shadow-sm mb-1.5 border-b-2 ${style.border}`}>
                   <span className="font-black text-[11px] tracking-widest">{assignee}</span>
                 </div>
                 
-                {/* ★予定カード（余白と文字を限界まで圧縮） */}
-                <div className="flex flex-col gap-1">
+                {/* ★予定カード（2行に合体させて極限まで短く！） */}
+                <div className="flex flex-col gap-1.5 px-0.5">
                   {personSchedules.length > 0 ? (
                     personSchedules.map(schedule => (
-                      <div key={schedule.id} onClick={() => openDetail(schedule)} className={`bg-white rounded p-1 shadow-sm border ${style.border} border-l-[3px] cursor-pointer active:scale-95 transition-transform flex flex-col`}>
-                        <div className={`flex items-center gap-0.5 ${style.text} font-black text-[9px]`}>
-                          <span className={`w-1 h-1 rounded-full ${style.dot}`}></span>
-                          {schedule.開始時間}
+                      <div key={schedule.タイムスタンプ || schedule.id} onClick={() => openDetail(schedule)} className={`bg-white rounded-[4px] p-1 shadow-sm border ${style.border} border-l-[3px] cursor-pointer active:scale-90 transition-transform flex flex-col gap-[2px] leading-none`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`font-black text-[10px] ${style.text}`}>{schedule.開始時間}</span>
+                          <span className="bg-gray-100 text-gray-500 text-[8px] font-bold px-1 py-0.5 rounded truncate max-w-[40px]">
+                            {schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}
+                          </span>
                         </div>
-                        <div className="font-bold text-[10px] leading-tight break-words text-gray-800 mt-0.5">
+                        <div className="font-bold text-[10px] text-gray-800 truncate mt-0.5">
                           {schedule.locationDetail || "(未定)"}
-                        </div>
-                        <div className="bg-gray-50 text-gray-500 text-[8px] font-bold px-1 py-0.5 rounded border border-gray-100 truncate mt-0.5">
-                          {schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}
                         </div>
                       </div>
                     ))
@@ -249,7 +266,7 @@ function WhiteboardContent() {
         </div>
       </div>
 
-      {/* 3. 詳細モーダル */}
+      {/* 3. 詳細モーダル（編集ボタン追加） */}
       {isDetailOpen && selectedSchedule && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-[#f8f6f0] w-full max-w-sm rounded-[20px] shadow-2xl overflow-hidden">
@@ -264,21 +281,25 @@ function WhiteboardContent() {
               <p className="text-xs"><strong>場所:</strong> {selectedSchedule.locationDetail}</p>
               <p className="text-xs"><strong>品目:</strong> {selectedSchedule.wbItem === 'その他' ? selectedSchedule.wbItemDetail : selectedSchedule.wbItem}</p>
             </div>
-            <div className="p-4 bg-gray-50">
-              <button onClick={() => setIsDetailOpen(false)} className="w-full bg-white border border-gray-300 text-gray-700 py-2 rounded-xl text-sm font-bold">
+            <div className="p-4 bg-gray-50 flex gap-2">
+              <button onClick={() => setIsDetailOpen(false)} className="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold">
                 閉じる
+              </button>
+              {/* ★編集ボタン */}
+              <button onClick={openEditForm} className="flex-1 bg-[#eaaa43] text-white py-2.5 rounded-xl text-sm font-black tracking-widest">
+                編集する
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 4. 入力フォーム（文字サイズ16px固定でズーム防止） */}
+      {/* 4. 入力フォーム（新規・編集 兼用） */}
       {isFormOpen && (
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-3">
           <div className="bg-[#f8f6f0] rounded-[20px] w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
             <div className="sticky top-0 bg-white px-5 py-3 border-b flex justify-between items-center z-10">
-              <h2 className="font-black text-[#eaaa43] text-sm">予定を登録（日報へ送信）</h2>
+              <h2 className="font-black text-[#eaaa43] text-sm">{formData.タイムスタンプ ? '予定の編集' : '予定を登録'}</h2>
               <button onClick={() => setIsFormOpen(false)} className="text-gray-400 text-xl">&times;</button>
             </div>
 
@@ -366,15 +387,15 @@ function WhiteboardContent() {
               </div>
 
               <button type="submit" disabled={isSubmitting} className="w-full bg-[#eaaa43] text-white py-3 rounded-xl text-sm font-black tracking-widest active:scale-95 transition-transform shadow-md disabled:bg-gray-400">
-                {isSubmitting ? '送信中...' : '予定を登録する'}
+                {isSubmitting ? '送信中...' : (formData.タイムスタンプ ? '更新して保存する' : '予定を登録する')}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* 5. フッターナビ */}
-      <div className="fixed bottom-0 w-full bg-white rounded-t-[30px] shadow-[0_-4px_20px_rgba(0,0,0,0.04)] h-[70px] flex justify-around items-center px-4 max-w-md mx-auto z-40">
+      {/* 5. フッターナビ（固定） */}
+      <div className="fixed bottom-0 w-full bg-white rounded-t-[30px] shadow-[0_-4px_20px_rgba(0,0,0,0.04)] h-[70px] flex justify-around items-center px-4 max-w-md mx-auto z-50">
         <Link href="/" className="p-2 cursor-pointer active:scale-90 transition-transform">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#b0b0b0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         </Link>
@@ -395,7 +416,7 @@ function WhiteboardContent() {
 
 export default function WhiteboardPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center items-center h-screen text-gray-500 font-bold text-sm">読み込み中...</div>}>
+    <Suspense fallback={<div className="flex justify-center items-center h-screen bg-[#f8f6f0] text-[#eaaa43] font-black text-sm">カレンダーを準備中...</div>}>
       <WhiteboardContent />
     </Suspense>
   );
