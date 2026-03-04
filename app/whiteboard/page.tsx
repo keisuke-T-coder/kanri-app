@@ -63,7 +63,6 @@ function WhiteboardContent() {
   const [isNoticeFormOpen, setIsNoticeFormOpen] = useState(false);
   const [noticeTargetDate, setNoticeTargetDate] = useState("");
 
-  // 初期化・データ取得
   useEffect(() => {
     setMounted(true);
     const savedWorker = localStorage.getItem('savedWorker');
@@ -83,10 +82,10 @@ function WhiteboardContent() {
       let noticesData = [];
       try { noticesData = await noticesRes.json(); } catch(e) { console.error("お知らせパースエラー", e); }
 
-      // --- 予定のパース ---
       const parsedSchedules = data.map((row: any) => {
-        let locDetail = "";
-        let wItem = "";
+        // ★ 修正点2：既存データ（A0日報）のフォールバック（救済）
+        let locDetail = row.訪問先 || "(場所未入力)";
+        let wItem = row.品目 || row.作業内容 || "未定";
         let wItemDet = "";
         let isAbsence = false;
         let absType = "";
@@ -98,6 +97,7 @@ function WhiteboardContent() {
           absType = absenceMatch[1].trim();
         }
 
+        // WB専用のメモタグがあればそれで上書きする
         const match = memo.match(/【WB予定】場所:(.*?) \/ 品目:(.*?)(?:\n|$)/);
         if (match) {
           locDetail = match[1].trim();
@@ -124,7 +124,6 @@ function WhiteboardContent() {
       });
       setSchedules(parsedSchedules);
 
-      // --- お知らせのパース ---
       const parsedNotices = Array.isArray(noticesData) ? noticesData.map((n: any) => ({
         ...n,
         confirmedBy: typeof n.confirmedBy === 'string' && n.confirmedBy !== '' ? n.confirmedBy.split(',') : (Array.isArray(n.confirmedBy) ? n.confirmedBy : [])
@@ -138,7 +137,6 @@ function WhiteboardContent() {
     }
   };
 
-  // お知らせデータをGASへ同期保存
   const syncNoticesToGAS = async (updatedNotices: any[]) => {
     try {
       const payloadNotices = updatedNotices.map(n => ({
@@ -170,7 +168,7 @@ function WhiteboardContent() {
   const getWeekDates = () => {
     const dates = [];
     const start = new Date(currentDate);
-    start.setDate(start.getDate() - start.getDay() + 1); // 月曜始まり
+    start.setDate(start.getDate() - start.getDay() + 1);
     for (let i = 0; i < 7; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
       dates.push(d);
@@ -222,10 +220,8 @@ function WhiteboardContent() {
     setIsFormOpen(true);
   };
 
-  // ★ 削除アクション
   const handleDelete = async () => {
     if (!confirm("本当に削除しますか？\n（日報入力画面からも完全に消去されます）")) return;
-    
     setIsDetailOpen(false);
     setIsLoading(true);
     try {
@@ -241,14 +237,11 @@ function WhiteboardContent() {
     }
   };
 
-  // ★ 保存アクション（通常 ＆ 休み）
   const handleSaveToGAS = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     let combinedMemo = formData.メモ.replace(/【WB(予定|休み)】.*?(?:\n|$)/g, '').trim();
-    
-    // TypeScriptエラーを回避するために型を any に指定
     let finalPayload: any = { ...formData };
 
     if (isAbsenceMode) {
@@ -279,7 +272,6 @@ function WhiteboardContent() {
     }
   };
 
-  // お知らせの既読トグル
   const toggleNoticeConfirm = (noticeId: string) => {
     if (!currentUser) return alert("ユーザーを選択してください");
     const updatedNotices = notices.map(n => {
@@ -316,7 +308,6 @@ function WhiteboardContent() {
   const inputBaseClass = "w-full bg-white border border-gray-300 rounded-[10px] px-3 py-2.5 text-[16px] text-gray-800 focus:outline-none focus:border-[#eaaa43] transition-all appearance-none";
   const selectWrapperClass = "relative after:content-['▼'] after:text-gray-400 after:text-[10px] after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:pointer-events-none";
 
-  // --- タイムライン描画用ヘルパー ---
   const calculateCardStyle = (start: string, end: string) => {
     const parseMins = (t: string) => {
       if(!t) return 0;
@@ -332,7 +323,6 @@ function WhiteboardContent() {
     return { top: `${Math.max(0, topPx)}px`, height: `${heightPx}px` };
   };
 
-  // --- サブコンポーネント：お知らせバナー ---
   const NoticeBanner = ({ targetDateStr }: { targetDateStr: string }) => {
     const dayNotices = notices.filter(n => n.date === targetDateStr);
     return (
@@ -363,22 +353,23 @@ function WhiteboardContent() {
     );
   };
 
-  // --- サブコンポーネント：タイムライン描画 ---
   const TimelineCanvas = ({ targetDateStr }: { targetDateStr: string }) => {
     const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
     const daySchedules = schedules.filter(s => s.日付 === targetDateStr);
 
     return (
-      <div className="relative flex flex-1 w-full bg-white overflow-hidden pb-[40px]" style={{ height: `${(END_HOUR - START_HOUR + 1) * HOUR_HEIGHT}px` }}>
+      // ★ 修正点1：h-fullをやめて絶対値の高さを持たせることで圧縮を防ぐ
+      <div className="relative w-full bg-white pb-[40px]" style={{ height: `${(END_HOUR - START_HOUR + 1) * HOUR_HEIGHT}px`, minHeight: `${(END_HOUR - START_HOUR + 1) * HOUR_HEIGHT}px` }}>
         <div className="absolute inset-0 pointer-events-none z-0 flex flex-col">
           {hours.map(h => (
-            <div key={h} className="w-full border-t border-gray-100 flex items-start" style={{ height: `${HOUR_HEIGHT}px` }}>
+            // ★ 修正点1：shrink-0 を追加して目盛りが潰れるのを防ぐ
+            <div key={h} className="w-full border-t border-gray-100 flex items-start shrink-0" style={{ height: `${HOUR_HEIGHT}px` }}>
               <span className="text-[9px] text-gray-400 font-bold pl-1 -mt-1.5 bg-white pr-1">{h}:00</span>
             </div>
           ))}
         </div>
         
-        <div className="relative z-10 flex w-full pl-[36px]">
+        <div className="relative z-10 flex w-full pl-[36px] h-full">
           {assignees.map(staff => {
             const staffSchedules = daySchedules.filter(s => s.担当者 === staff);
             const style = staffStyles[staff];
@@ -414,7 +405,7 @@ function WhiteboardContent() {
   return (
     <div className="h-screen bg-[#f8f6f0] font-sans text-slate-800 flex flex-col overflow-hidden">
       
-      {/* 1. ヘッダー（固定） */}
+      {/* 1. ヘッダー */}
       <div className="flex-none pt-4 pb-2 px-2 bg-[#f8f6f0] shadow-sm z-40 border-b border-gray-200">
         <div className="max-w-md mx-auto flex flex-col gap-2">
           <div className="flex items-center justify-between px-1 mb-1">
@@ -450,7 +441,7 @@ function WhiteboardContent() {
       </div>
 
       {/* 2. メインキャンバス（スクロールエリア） */}
-      <div className="flex-1 overflow-auto bg-[#f8f6f0] pb-[80px]">
+      <div className="flex-1 overflow-y-auto bg-[#f8f6f0] pb-[80px]">
         {/* 固定スタッフヘッダー */}
         <div className="sticky top-0 z-30 flex pl-[36px] bg-[#f8f6f0]/95 backdrop-blur-sm border-b border-gray-200 py-1 shadow-sm">
           {assignees.map(staff => (
@@ -461,7 +452,7 @@ function WhiteboardContent() {
         </div>
 
         {viewMode === 'daily' ? (
-           <div className="flex flex-col">
+           <div className="flex flex-col relative">
              <NoticeBanner targetDateStr={dateString} />
              <TimelineCanvas targetDateStr={dateString} />
            </div>
