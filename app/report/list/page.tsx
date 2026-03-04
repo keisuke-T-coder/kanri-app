@@ -108,14 +108,15 @@ function ReportList() {
       開始時間: extractTimeForInput(item.開始時間),
       終了時間: extractTimeForInput(item.終了時間),
       提案内容: isOtherProposal ? 'その他' : (item.提案内容 || ''),
-      提案内容詳細: proposalDetail
+      提案内容詳細: proposalDetail,
+      成約有無: (item.メモ && item.メモ.includes('【成約】')) ? '有' : '無'
     });
     setSubmitMessage("");
   };
 
   const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    // ★品目がトイレ以外になったら品番をクリア
+    // 品目がトイレ以外になったら品番をクリア
     if (name === '品目' && value !== 'トイレ') {
       setEditingItem({ ...editingItem, [name]: value, 品番: '' });
     } else {
@@ -127,8 +128,39 @@ function ReportList() {
     setEditingItem({ ...editingItem, [name]: value });
   };
 
+  // 成約トグルの処理
+  const handleSeiyakuToggle = (value: string) => {
+    let newMemo = editingItem.メモ || "";
+    
+    if (value === '有') {
+      if (!newMemo.includes('【成約】')) {
+        newMemo = `【成約】\n${newMemo}`;
+      }
+    } else {
+      newMemo = newMemo.replace('【成約】\n', '').replace('【成約】', '');
+    }
+
+    setEditingItem({ ...editingItem, 成約有無: value, メモ: newMemo });
+  };
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // ★ 追加：成約有無が「有」の時の必須入力ストッパー
+    if (editingItem.成約有無 === '有') {
+      // メモ欄から「【成約】」や「【WB予定】...」「【WB休み】...」のタグ文字だけを取り除く
+      const pureMemo = (editingItem.メモ || "")
+        .replace(/【成約】/g, '')
+        .replace(/【WB(予定|休み)】.*?(?:\n|$)/g, '')
+        .trim();
+        
+      // タグを除いて文字が残っていなければ（つまり手打ちで追記していなければ）エラー
+      if (pureMemo.length === 0) {
+        setSubmitMessage("エラー：成約した製品名や詳細をメモ欄に入力してください。");
+        return; // ここで処理をストップ
+      }
+    }
+
     setIsSubmitting(true);
     setSubmitMessage("");
 
@@ -159,7 +191,7 @@ function ReportList() {
       setEditingItem(null);
       await fetchData();
     } catch (error) {
-      setSubmitMessage("通信エラーが発生しました。");
+      setSubmitMessage("エラー：通信に失敗しました。もう一度お試しください。");
     } finally {
       setIsSubmitting(false);
     }
@@ -408,6 +440,7 @@ function ReportList() {
             </div>
           </div>
 
+          {/* ★ バリデーションエラー等のメッセージ表示枠 */}
           {submitMessage && (
             <div className={`w-[92%] max-w-md mb-4 p-4 rounded-xl text-center text-sm font-bold shadow-sm ${submitMessage.includes('エラー') ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-[#eaaa43] border border-[#eaaa43]'}`}>
               {submitMessage}
@@ -463,7 +496,7 @@ function ReportList() {
                     <label className={labelClass}>クライアント</label>
                     <select name="クライアント" value={editingItem.クライアント} onChange={handleEditChange} className={inputBaseClass}>
                       <option value="">(-----)</option>
-                      <option value="(-----)">(-----)</option> {/* WBからのダミーデータ受け皿 */}
+                      <option value="(-----)">(-----)</option>
                       {clients.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
@@ -487,7 +520,6 @@ function ReportList() {
                   </div>
                 </div>
 
-                {/* ★ トイレ選択時の品番入力欄（A1のロジック） */}
                 {editingItem.品目 === 'トイレ' && (
                   <div className="animate-fade-in bg-orange-50/50 p-3 rounded-xl border border-orange-100">
                     <label className={`${labelClass} text-orange-600`}>品番（※トイレ選択時）</label>
@@ -600,6 +632,7 @@ function ReportList() {
                 <span className="text-gray-300 font-black text-xl leading-none">05</span>
               </div>
               <div className="space-y-4">
+                
                 <div className="grid grid-cols-2 gap-3">
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>状況</label>
@@ -608,22 +641,45 @@ function ReportList() {
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>遠隔・高速利用</label>
+                    <label className={labelClass}>成約有無</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => { handleEditToggle('遠隔高速利用', '無'); setEditingItem(p => ({...p, 伝票番号: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleEditToggle('遠隔高速利用', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '有' ? 'bg-white text-blue-500 shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => handleSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.成約有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.成約有無 === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
                 </div>
-                {editingItem.遠隔高速利用 === '有' && (
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelClass}>伝票番号</label>
-                    <input type="text" name="伝票番号" value={editingItem.伝票番号} onChange={handleEditChange} required className={inputBaseClass} />
+                    <label className={labelClass}>遠隔・高速利用</label>
+                    <div className="flex bg-gray-100 p-1 rounded-xl">
+                      <button type="button" onClick={() => { handleEditToggle('遠隔高速利用', '無'); setEditingItem(p => ({...p, 伝票番号: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditToggle('遠隔高速利用', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
+                    </div>
                   </div>
-                )}
+                  {editingItem.遠隔高速利用 === '有' && (
+                    <div className="animate-fade-in">
+                      <label className={labelClass}>伝票番号</label>
+                      <input type="text" name="伝票番号" value={editingItem.伝票番号} onChange={handleEditChange} required className={inputBaseClass} />
+                    </div>
+                  )}
+                </div>
+
                 <div>
-                  <label className={labelClass}>メモ</label>
-                  <textarea name="メモ" value={editingItem.メモ} onChange={handleEditChange} rows={3} className={`${inputBaseClass} resize-none`}></textarea>
+                  <div className="flex justify-between items-end mb-1.5 ml-1">
+                    <label className="text-xs font-bold text-gray-600 block">メモ</label>
+                    {editingItem.成約有無 === '有' && (
+                      <span className="text-[10px] font-bold text-red-500 animate-pulse">※成約した製品名を入力してください</span>
+                    )}
+                  </div>
+                  <textarea 
+                    name="メモ" 
+                    value={editingItem.メモ} 
+                    onChange={handleEditChange} 
+                    rows={4} 
+                    className={`${inputBaseClass} resize-none ${editingItem.成約有無 === '有' ? 'border-pink-200 bg-pink-50/30' : ''}`} 
+                    placeholder={editingItem.成約有無 === '有' ? "例：【成約】DT-1234 を販売しました。" : "特記事項があれば入力してください"}
+                  ></textarea>
                 </div>
               </div>
             </div>
