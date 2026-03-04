@@ -247,7 +247,9 @@ function WhiteboardContent() {
     setIsSubmitting(true);
 
     let combinedMemo = formData.メモ.replace(/【WB(予定|休み)】.*?(?:\n|$)/g, '').trim();
-    let finalPayload = { ...formData };
+    
+    // TypeScriptエラーを回避するために型を any に指定
+    let finalPayload: any = { ...formData };
 
     if (isAbsenceMode) {
       const wbMarker = `【WB休み】種類:${formData.absenceType}`;
