@@ -24,7 +24,7 @@ const absenceTypes = ["1日休み", "午前休", "午後休"];
 
 // --- タイムライン設定 ---
 const START_HOUR = 7;
-const END_HOUR = 20;
+const END_HOUR = 21;
 
 function getTodayString() {
   const d = new Date();
@@ -40,6 +40,318 @@ const parseMins = (t: string) => {
   if(!t) return 0;
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
+};
+
+// --- ヘルパー関数 ---
+const processOverlaps = (staffSchedules: any[], dynamicHourHeight: number, dynamicMinBlock: number) => {
+  const parsed = staffSchedules.map(s => ({ ...s, startMins: parseMins(s.開始時間), endMins: parseMins(s.終了時間) }))
+                               .sort((a, b) => a.startMins - b.startMins);
+  const columns: any[][] = [];
+  parsed.forEach(s => {
+    let placed = false;
+    for(let i=0; i<columns.length; i++){
+      if(s.startMins >= columns[i][columns[i].length-1].endMins) {
+        columns[i].push(s);
+        placed = true;
+        break;
+      }
+    }
+    if(!placed) columns.push([s]);
+  });
+  
+  const numCols = columns.length || 1;
+  const width = 94 / numCols; 
+  
+  columns.forEach((col, i) => {
+    col.forEach(s => {
+      s.computedLeft = 3 + (i * width);
+      s.computedWidth = width;
+    });
+  });
+  return parsed;
+};
+
+// --- サブコンポーネント: お知らせバナー ---
+const NoticeBanner = ({ targetDateStr, notices, currentUser, deleteNotice, toggleNoticeConfirm, setNoticeTargetDate, setIsNoticeFormOpen }: any) => {
+  const dayNotices = notices.filter((n: any) => n.date === targetDateStr);
+  return (
+    <div className="bg-white/50 border-b border-gray-200 p-2 space-y-2">
+      {dayNotices.map((n: any) => {
+        const isConfirmed = currentUser && n.confirmedBy.includes(currentUser);
+        return (
+          <div key={n.id} className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 flex flex-col gap-1 shadow-sm relative">
+             <button onClick={() => deleteNotice(n.id)} className="absolute top-1 right-2 text-gray-400 hover:text-red-500 text-xs p-1">🗑️</button>
+             <div className="font-bold text-[11px] text-gray-800 pr-6">⚠️ {n.text} <span className="text-[9px] text-gray-400">({n.author})</span></div>
+             <div className="flex justify-between items-center mt-1">
+               <div className="text-[9px] text-gray-500 font-bold flex flex-wrap gap-1">
+                  {n.confirmedBy.length > 0 ? `確認済: ${n.confirmedBy.join(', ')}` : '未確認'}
+               </div>
+               {currentUser && (
+                 <button onClick={() => toggleNoticeConfirm(n.id)} className={`px-2 py-1 rounded text-[9px] font-black transition-colors ${isConfirmed ? 'bg-gray-200 text-gray-600' : 'bg-green-500 text-white shadow-sm active:scale-95 transition-transform'}`}>
+                    {isConfirmed ? '確認済 取消' : '✅ 確認する'}
+                 </button>
+               )}
+             </div>
+          </div>
+        );
+      })}
+      <button onClick={() => { setNoticeTargetDate(targetDateStr); setIsNoticeFormOpen(true); }} className="text-[#eaaa43] font-bold text-[10px] flex items-center gap-1 active:scale-95 transition-transform">
+        ＋ お知らせを追加
+      </button>
+    </div>
+  );
+};
+
+// --- サブコンポーネント: タイムライン本体 ---
+const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, handleCanvasClick, fetchData, isZoomed, dynamicHourHeight, dynamicMinBlock }: any) => {
+  const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
+  const daySchedules = schedules.filter((s: any) => s.日付 === targetDateStr);
+  
+  // 長押しタイマー用のRef
+  const longPressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // ドラッグ操作用のローカル状態
+  const [isDragging, setIsDragging] = useState(false);
+  const [isActuallyDragging, setIsActuallyDragging] = useState(false);
+  const [isPressing, setIsPressing] = useState(false); // 長押し待機中
+  const [dragStartY, setDragStartY] = useState(0);
+  const [draggedSchedule, setDraggedSchedule] = useState<any>(null);
+  const [dragOffsetY, setDragOffsetY] = useState(0);
+  const [dragCurrentTop, setDragCurrentTop] = useState(0);
+  const [dragStartTime, setDragStartTime] = useState("");
+  const [dragEndTime, setDragEndTime] = useState("");
+
+  const handleMouseDown = (e: React.MouseEvent | React.TouchEvent, schedule: any) => {
+    e.stopPropagation();
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const offsetY = clientY - rect.top;
+    
+    // 他のタイマーをクリア
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    setIsDragging(false);
+    setIsActuallyDragging(false);
+    setIsPressing(true);
+    setDragStartY(clientY);
+    setDraggedSchedule(schedule);
+    setDragOffsetY(offsetY);
+    setDragCurrentTop(rect.top - (e.currentTarget.parentElement?.getBoundingClientRect().top || 0));
+    setDragStartTime(schedule.開始時間);
+    setDragEndTime(schedule.終了時間);
+
+    // 1秒間の長押しタイマーを開始
+    longPressTimerRef.current = setTimeout(() => {
+      setIsDragging(true);
+      setIsActuallyDragging(true);
+      setIsPressing(false);
+      // 長押し完了時に軽くバイブレーション（対応機種のみ）
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+    }, 1000);
+  };
+
+  const handleMouseMove = (e: MouseEvent | TouchEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
+    
+    // まだドラッグ開始していない（長押し待機中）の場合
+    if (!isDragging && isPressing) {
+      // 10px以上動いたら「長押し」をキャンセル（ユーザーが誤って動かしたと判断）
+      if (Math.abs(clientY - dragStartY) > 10) {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        setIsPressing(false);
+      }
+      return;
+    }
+
+    if (!isDragging || !draggedSchedule) return;
+
+    const parentRect = document.getElementById(`canvas-${targetDateStr}`)?.getBoundingClientRect();
+    if (!parentRect) return;
+
+    let newTop = clientY - parentRect.top - dragOffsetY;
+    newTop = Math.max(0, Math.min(newTop, parentRect.height - dynamicMinBlock));
+
+    const snapPx = dynamicHourHeight / 2;
+    const snappedTop = Math.round(newTop / snapPx) * snapPx;
+    setDragCurrentTop(snappedTop);
+
+    const totalMinutes = (snappedTop / dynamicHourHeight) * 60;
+    const startHour = Math.floor(totalMinutes / 60) + START_HOUR;
+    const startMin = Math.round((totalMinutes % 60) / 30) * 30;
+    
+    const durationMins = parseMins(draggedSchedule.終了時間) - parseMins(draggedSchedule.開始時間);
+    const endTotalMins = (startHour - START_HOUR) * 60 + startMin + durationMins;
+    const endHour = Math.floor(endTotalMins / 60) + START_HOUR;
+    const endMin = endTotalMins % 60;
+
+    const newStart = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+    const newEnd = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+    setDragStartTime(newStart);
+    setDragEndTime(newEnd);
+  };
+
+  // ドラッグ終了直後の誤クリック防止用Ref
+  const dragFinishedRef = React.useRef(false);
+
+  const handleMouseUp = async (e: MouseEvent | TouchEvent) => {
+    // タイマーをクリア
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+
+    const wasDraggingBefore = isDragging;
+    const wasPressingBefore = isPressing;
+
+    if (!isDragging && !isPressing && !draggedSchedule) return;
+    
+    const hasChanged = isDragging && isActuallyDragging && (dragStartTime !== draggedSchedule.開始時間 || dragEndTime !== draggedSchedule.終了時間);
+    
+    if (hasChanged) {
+      const updatedSchedule = { ...draggedSchedule, 開始時間: dragStartTime, 終了時間: dragEndTime };
+      setSchedules((prev: any[]) => prev.map(s => s.タイムスタンプ === draggedSchedule.タイムスタンプ ? updatedSchedule : s));
+      
+      // 非同期でサーバーに保存
+      const saveToGAS = async (payload: any) => {
+        try {
+          const formBody = new URLSearchParams();
+          formBody.append('data', JSON.stringify({ ...payload, action: 'update' }));
+          await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
+        } catch (error) {
+          console.error("サーバー保存エラー", error);
+          alert("通信エラーが発生しました。最新の状態を読み込みます。");
+          fetchData();
+        }
+      };
+      saveToGAS(updatedSchedule);
+
+      // ドラッグ終了フラグを立てて、直後のクリックイベントを無視するようにする
+      dragFinishedRef.current = true;
+      setTimeout(() => dragFinishedRef.current = false, 100);
+    }
+
+    // ドラッグでも長押し完了でもなかった場合（＝単なるクリック）
+    if (!wasDraggingBefore && wasPressingBefore && draggedSchedule) {
+      openDetail(draggedSchedule, e as any);
+    }
+
+    // ★ サーバーのレスポンスを待たずに即座にドラッグ状態を解除する
+    setIsDragging(false);
+    setIsActuallyDragging(false);
+    setIsPressing(false);
+    setDraggedSchedule(null);
+  };
+
+  useEffect(() => {
+    if (isDragging || isPressing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('touchmove', handleMouseMove, { passive: false });
+      window.addEventListener('touchend', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleMouseMove);
+      window.removeEventListener('touchend', handleMouseUp);
+    };
+  }, [isDragging, isPressing, draggedSchedule, dragOffsetY, dragStartTime, dragEndTime, isActuallyDragging]);
+
+  return (
+    <div id={`canvas-${targetDateStr}`} className="relative w-full bg-white pb-[40px]" style={{ height: `${(END_HOUR - START_HOUR + 1) * dynamicHourHeight}px`, minHeight: `${(END_HOUR - START_HOUR + 1) * dynamicHourHeight}px` }}>
+      <div className="absolute inset-0 pointer-events-none z-0 flex flex-col">
+        {hours.map(h => (
+          <div key={h} className="w-full border-t border-gray-100 flex items-start shrink-0 relative" style={{ height: `${dynamicHourHeight}px` }}>
+            <span className={`text-gray-400 font-bold pl-1 bg-white pr-1 ${isZoomed ? 'text-[8px] -mt-1' : 'text-[9px] -mt-1.5'}`}>{h}:00</span>
+            <div className="absolute top-1/2 left-0 w-full border-t border-gray-50/50 border-dashed pointer-events-none"></div>
+          </div>
+        ))}
+      </div>
+      
+      <div className="relative z-10 flex w-full pl-[36px] h-full cursor-pointer">
+        {assignees.map(staff => {
+          const staffSchedules = processOverlaps(daySchedules.filter((s: any) => s.担当者 === staff), dynamicHourHeight, dynamicMinBlock);
+          const style = staffStyles[staff];
+          return (
+            <div key={staff} 
+                 className="flex-1 border-r border-gray-50 relative min-w-[50px] hover:bg-gray-50/50 transition-colors"
+                 onClick={(e) => {
+                   // ドラッグ中や、終了直後のクリックは無視する
+                   if (isDragging || isActuallyDragging || isPressing || dragFinishedRef.current) return;
+                   
+                   // 重要: スケジュールブロック本体やその中の要素を触った場合は、背景のクリックイベント（新規作成）を無視する
+                   if (e.target !== e.currentTarget) return;
+
+                   handleCanvasClick(e, staff, targetDateStr);
+                 }}> 
+              
+              {staffSchedules.map((schedule, idx) => {
+                const startMins = schedule.startMins - (START_HOUR * 60);
+                const endMins = schedule.endMins - (START_HOUR * 60);
+                const topPx = (startMins / 60) * dynamicHourHeight;
+                let heightPx = ((endMins - startMins) / 60) * dynamicHourHeight;
+                heightPx = Math.max(heightPx, dynamicMinBlock); 
+
+                // 長押し中の視覚フィードバック
+                const isCurrentPressing = isPressing && draggedSchedule?.タイムスタンプ === schedule.タイムスタンプ;
+
+                if (schedule.isAbsence) {
+                  return (
+                    <div key={schedule.タイムスタンプ || idx} onClick={(e) => openDetail(schedule, e)} className="absolute bg-red-500 rounded-[4px] shadow-sm cursor-pointer active:scale-95 transition-transform flex flex-col justify-center items-center overflow-hidden border border-red-600 z-20" 
+                         style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
+                      <span className={`text-white font-black writing-vertical-rl ${isZoomed ? 'text-[8px]' : 'text-[10px]'}`}>{schedule.absenceType}</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={schedule.タイムスタンプ || idx} 
+                       onMouseDown={(e) => handleMouseDown(e, schedule)}
+                       onTouchStart={(e) => handleMouseDown(e, schedule)}
+                       className={`absolute bg-white rounded-[6px] shadow-md border ${style.border} border-l-[4px] cursor-pointer transition-all flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-20 leading-tight ${(isDragging || isActuallyDragging) && draggedSchedule?.タイムスタンプ === schedule.タイムスタンプ ? 'opacity-0 scale-95' : ''} ${isCurrentPressing ? 'ring-4 ring-orange-400 ring-opacity-50 animate-pulse bg-orange-50' : ''}`} 
+                       style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
+                    
+                    {isZoomed ? (
+                      <div className="flex flex-col gap-0.5 justify-center h-full">
+                         <span className="bg-gray-100 text-gray-600 text-[7px] font-bold px-1 rounded truncate self-start">{schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}</span>
+                         <span className="font-bold text-[8px] text-gray-800 truncate">{schedule.locationDetail}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-start gap-1">
+                          <span className={`font-black text-[9px] ${style.text}`}>{schedule.開始時間}</span>
+                          <span className="bg-gray-100 text-gray-600 text-[8px] font-bold px-1 rounded truncate min-w-0">{schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}</span>
+                        </div>
+                        <div className="font-bold text-[9px] text-gray-800 mt-0.5 line-clamp-2">{schedule.locationDetail}</div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+
+              {isDragging && draggedSchedule && schedules.find((s: any) => s.タイムスタンプ === draggedSchedule.タイムスタンプ)?.日付 === targetDateStr && (
+                <div className={`absolute bg-[#eaaa43]/80 rounded-[6px] shadow-2xl border-2 border-white border-l-[4px] border-l-[#eaaa43] flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-50 pointer-events-none transition-none transform scale-105`}
+                     style={{ 
+                       top: `${dragCurrentTop}px`, 
+                       height: `${((parseMins(draggedSchedule.終了時間) - parseMins(draggedSchedule.開始時間)) / 60) * dynamicHourHeight}px`, 
+                       left: `${draggedSchedule.computedLeft}%`, 
+                       width: `${draggedSchedule.computedWidth}%` 
+                     }}>
+                  <div className="flex justify-between items-start">
+                    <span className="font-black text-[10px] text-white underline decoration-white decoration-2 underline-offset-2">{dragStartTime}</span>
+                    <span className="bg-white/30 text-white text-[8px] font-bold px-1 rounded truncate">{draggedSchedule.wbItem}</span>
+                  </div>
+                  <div className="font-bold text-[9px] text-white mt-0.5">{draggedSchedule.locationDetail}</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 function WhiteboardContent() {
@@ -59,9 +371,8 @@ function WhiteboardContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAbsenceMode, setIsAbsenceMode] = useState(false); 
   
-  // スクショ用のズーム状態
   const [isZoomed, setIsZoomed] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     タイムスタンプ: '', 日付: getTodayString(), 開始時間: '', 終了時間: '', 担当者: '', 訪問先: '', エリア: '', クライアント: '', 品目: '', 品番: '', 依頼内容: '', 作業内容: '', 作業区分: '修理', 技術料: '0', 修理金額: '0', 販売金額: '0', 提案有無: '無', 提案内容: '', 遠隔高速利用: '無', 伝票番号: '', 状況: '未完了(予定)', メモ: '', 成約有無: '無', locationDetail: '', wbItem: '', wbItemDetail: '', absenceType: '1日休み'
   });
@@ -244,11 +555,14 @@ function WhiteboardContent() {
 
     const rect = e.currentTarget.getBoundingClientRect();
     const offsetY = e.clientY - rect.top;
-    const clickedHour = Math.floor(offsetY / dynamicHourHeight) + START_HOUR;
-    const validHour = Math.min(Math.max(clickedHour, START_HOUR), END_HOUR);
+    const clickedMinutes = Math.floor((offsetY / dynamicHourHeight) * 2) * 30;
+    const startHour = Math.floor(clickedMinutes / 60) + START_HOUR;
+    const startMin = clickedMinutes % 60;
+    const endHour = Math.floor((clickedMinutes + 60) / 60) + START_HOUR;
+    const endMin = (clickedMinutes + 60) % 60;
     
-    const startStr = `${String(validHour).padStart(2, '0')}:00`;
-    const endStr = `${String(validHour + 1).padStart(2, '0')}:00`;
+    const startStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+    const endStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
 
     setIsAbsenceMode(false);
     setFormData(prev => ({
@@ -362,131 +676,6 @@ function WhiteboardContent() {
   const inputBaseClass = "w-full bg-white border border-gray-300 rounded-[10px] px-3 py-2.5 text-[16px] text-gray-800 focus:outline-none focus:border-[#eaaa43] transition-all appearance-none";
   const selectWrapperClass = "relative after:content-['▼'] after:text-gray-400 after:text-[10px] after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:pointer-events-none";
 
-  const processOverlaps = (staffSchedules: any[]) => {
-    const parsed = staffSchedules.map(s => ({ ...s, startMins: parseMins(s.開始時間), endMins: parseMins(s.終了時間) }))
-                                 .sort((a, b) => a.startMins - b.startMins);
-    const columns: any[][] = [];
-    parsed.forEach(s => {
-      let placed = false;
-      for(let i=0; i<columns.length; i++){
-        if(s.startMins >= columns[i][columns[i].length-1].endMins) {
-          columns[i].push(s);
-          placed = true;
-          break;
-        }
-      }
-      if(!placed) columns.push([s]);
-    });
-    
-    const numCols = columns.length || 1;
-    const width = 94 / numCols; 
-    
-    columns.forEach((col, i) => {
-      col.forEach(s => {
-        s.computedLeft = 3 + (i * width);
-        s.computedWidth = width;
-      });
-    });
-    return parsed;
-  };
-
-  const NoticeBanner = ({ targetDateStr }: { targetDateStr: string }) => {
-    const dayNotices = notices.filter(n => n.date === targetDateStr);
-    return (
-      <div className="bg-white/50 border-b border-gray-200 p-2 space-y-2">
-        {dayNotices.map(n => {
-          const isConfirmed = currentUser && n.confirmedBy.includes(currentUser);
-          return (
-            <div key={n.id} className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 flex flex-col gap-1 shadow-sm relative">
-               <button onClick={() => deleteNotice(n.id)} className="absolute top-1 right-2 text-gray-400 hover:text-red-500 text-xs p-1">🗑️</button>
-               <div className="font-bold text-[11px] text-gray-800 pr-6">⚠️ {n.text} <span className="text-[9px] text-gray-400">({n.author})</span></div>
-               <div className="flex justify-between items-center mt-1">
-                 <div className="text-[9px] text-gray-500 font-bold flex flex-wrap gap-1">
-                   {n.confirmedBy.length > 0 ? `確認済: ${n.confirmedBy.join(', ')}` : '未確認'}
-                 </div>
-                 {currentUser && (
-                   <button onClick={() => toggleNoticeConfirm(n.id)} className={`px-2 py-1 rounded text-[9px] font-black transition-colors ${isConfirmed ? 'bg-gray-200 text-gray-600' : 'bg-green-500 text-white shadow-sm active:scale-95 transition-transform'}`}>
-                     {isConfirmed ? '確認済 取消' : '✅ 確認する'}
-                   </button>
-                 )}
-               </div>
-            </div>
-          );
-        })}
-        <button onClick={() => { setNoticeTargetDate(targetDateStr); setIsNoticeFormOpen(true); }} className="text-[#eaaa43] font-bold text-[10px] flex items-center gap-1 active:scale-95 transition-transform">
-          ＋ お知らせを追加
-        </button>
-      </div>
-    );
-  };
-
-  const TimelineCanvas = ({ targetDateStr }: { targetDateStr: string }) => {
-    const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
-    const daySchedules = schedules.filter(s => s.日付 === targetDateStr);
-
-    return (
-      <div className="relative w-full bg-white pb-[40px]" style={{ height: `${(END_HOUR - START_HOUR + 1) * dynamicHourHeight}px`, minHeight: `${(END_HOUR - START_HOUR + 1) * dynamicHourHeight}px` }}>
-        <div className="absolute inset-0 pointer-events-none z-0 flex flex-col">
-          {hours.map(h => (
-            <div key={h} className="w-full border-t border-gray-100 flex items-start shrink-0" style={{ height: `${dynamicHourHeight}px` }}>
-              <span className={`text-gray-400 font-bold pl-1 bg-white pr-1 ${isZoomed ? 'text-[8px] -mt-1' : 'text-[9px] -mt-1.5'}`}>{h}:00</span>
-            </div>
-          ))}
-        </div>
-        
-        <div className="relative z-10 flex w-full pl-[36px] h-full cursor-pointer">
-          {assignees.map(staff => {
-            const staffSchedules = processOverlaps(daySchedules.filter(s => s.担当者 === staff));
-            const style = staffStyles[staff];
-            return (
-              <div key={staff} 
-                   className="flex-1 border-r border-gray-50 relative min-w-[50px] hover:bg-gray-50/50 transition-colors"
-                   onClick={(e) => handleCanvasClick(e, staff, targetDateStr)}> 
-                
-                {staffSchedules.map((schedule, idx) => {
-                  const startMins = schedule.startMins - (START_HOUR * 60);
-                  const endMins = schedule.endMins - (START_HOUR * 60);
-                  const topPx = (startMins / 60) * dynamicHourHeight;
-                  let heightPx = ((endMins - startMins) / 60) * dynamicHourHeight;
-                  heightPx = Math.max(heightPx, dynamicMinBlock); 
-
-                  if (schedule.isAbsence) {
-                    return (
-                      <div key={schedule.タイムスタンプ || idx} onClick={(e) => openDetail(schedule, e)} className="absolute bg-red-500 rounded-[4px] shadow-sm cursor-pointer active:scale-95 transition-transform flex flex-col justify-center items-center overflow-hidden border border-red-600 z-20" 
-                           style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
-                        <span className={`text-white font-black writing-vertical-rl ${isZoomed ? 'text-[8px]' : 'text-[10px]'}`}>{schedule.absenceType}</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={schedule.タイムスタンプ || idx} onClick={(e) => openDetail(schedule, e)} className={`absolute bg-white rounded-[6px] shadow-md border ${style.border} border-l-[4px] cursor-pointer active:scale-95 transition-transform flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-20 leading-tight`} 
-                         style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
-                      
-                      {/* ★ 文字潰れ対策：縮小時は時間表示を消して1行にまとめる */}
-                      {isZoomed ? (
-                        <div className="flex flex-col gap-0.5 justify-center h-full">
-                           <span className="bg-gray-100 text-gray-600 text-[7px] font-bold px-1 rounded truncate self-start">{schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}</span>
-                           <span className="font-bold text-[8px] text-gray-800 truncate">{schedule.locationDetail}</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex justify-between items-start gap-1">
-                            <span className={`font-black text-[9px] ${style.text}`}>{schedule.開始時間}</span>
-                            <span className="bg-gray-100 text-gray-600 text-[8px] font-bold px-1 rounded truncate min-w-0">{schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}</span>
-                          </div>
-                          <div className="font-bold text-[9px] text-gray-800 mt-0.5 line-clamp-2">{schedule.locationDetail}</div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
 
   const isEditable = !currentUser || !selectedSchedule || currentUser === selectedSchedule.担当者;
 
@@ -557,8 +746,8 @@ function WhiteboardContent() {
 
         {viewMode === 'daily' ? (
            <div className="flex flex-col relative">
-             <NoticeBanner targetDateStr={dateString} />
-             <TimelineCanvas targetDateStr={dateString} />
+             <NoticeBanner targetDateStr={dateString} notices={notices} currentUser={currentUser} deleteNotice={deleteNotice} toggleNoticeConfirm={toggleNoticeConfirm} setNoticeTargetDate={setNoticeTargetDate} setIsNoticeFormOpen={setIsNoticeFormOpen} />
+             <TimelineCanvas targetDateStr={dateString} schedules={schedules} setSchedules={setSchedules} openDetail={openDetail} handleCanvasClick={handleCanvasClick} fetchData={fetchData} isZoomed={isZoomed} dynamicHourHeight={dynamicHourHeight} dynamicMinBlock={dynamicMinBlock} />
            </div>
         ) : (
            <div className="flex flex-col gap-4 py-2">
@@ -569,8 +758,8 @@ function WhiteboardContent() {
                    <div className="bg-gray-100 px-3 py-1.5 font-black text-xs text-gray-700 border-b border-gray-200">
                      {formatDateDisplay(date)}
                    </div>
-                   <NoticeBanner targetDateStr={dStr} />
-                   <TimelineCanvas targetDateStr={dStr} />
+                    <NoticeBanner targetDateStr={dStr} notices={notices} currentUser={currentUser} deleteNotice={deleteNotice} toggleNoticeConfirm={toggleNoticeConfirm} setNoticeTargetDate={setNoticeTargetDate} setIsNoticeFormOpen={setIsNoticeFormOpen} />
+                    <TimelineCanvas targetDateStr={dStr} schedules={schedules} setSchedules={setSchedules} openDetail={openDetail} handleCanvasClick={handleCanvasClick} fetchData={fetchData} isZoomed={isZoomed} dynamicHourHeight={dynamicHourHeight} dynamicMinBlock={dynamicMinBlock} />
                  </div>
                );
              })}

@@ -70,6 +70,25 @@ function HistoryList() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
+  // ★ 過去24ヶ月分 + 全期間の選択肢を生成
+  const monthOptions = React.useMemo(() => {
+    const options = [{ value: "all", label: "全期間 (過去すべて)" }];
+    const current = new Date();
+    for (let i = 0; i < 24; i++) {
+        const d = new Date(current.getFullYear(), current.getMonth() - i, 1);
+        const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月`;
+        options.push({ value: val, label: label });
+    }
+    return options;
+  }, []);
+
+  // ★ 案件検索用のステート
+  const [searchKeyword, setSearchKeyword] = useState("");
+
+  // ★ 日付検索用のステート
+  const [searchDate, setSearchDate] = useState("");
+
   const [allData, setAllData] = useState<any[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -104,7 +123,7 @@ function HistoryList() {
     fetchData();
   }, [fetchData]);
 
-  // ★ データ加工ロジック：選択月に絞り込み → 日付ごとにグループ化
+  // ★ データ加工ロジック：フィルタリングとグループ化
   const groupedData: Record<string, any[]> = {};
   
   allData.forEach(item => {
@@ -112,12 +131,30 @@ function HistoryList() {
     const cleanDate = extractDateForInput(item.日付);
     if (!cleanDate) return;
     
-    // YYYY-MM形式で月をチェック
     const itemMonth = cleanDate.substring(0, 7);
-    if (itemMonth === selectedMonth) {
-      if (!groupedData[cleanDate]) groupedData[cleanDate] = [];
-      groupedData[cleanDate].push(item);
+    const keyword = searchKeyword.trim().toLowerCase();
+
+    // 検索・フィルタリング条件の判定
+    let matchesKeyword = true;
+    if (keyword !== "") {
+      const targetStr = `${item.訪問先 || ""} ${item.クライアント || ""} ${item.依頼内容 || ""} ${item.作業内容 || ""} ${item.メモ || ""}`.toLowerCase();
+      matchesKeyword = targetStr.includes(keyword);
     }
+
+    const matchesMonth = (selectedMonth === "all" || itemMonth === selectedMonth);
+    const matchesDate = (!searchDate || cleanDate === searchDate);
+
+    // キーワード検索または日付検索が入力されている場合は、月選択の制約を無視して検索結果を表示する
+    const isSearching = keyword !== "" || searchDate !== "";
+    
+    if (isSearching) {
+      if (!matchesKeyword || !matchesDate) return;
+    } else {
+      if (!matchesMonth || !matchesKeyword || !matchesDate) return;
+    }
+
+    if (!groupedData[cleanDate]) groupedData[cleanDate] = [];
+    groupedData[cleanDate].push(item);
   });
 
   // 日付の降順（新しい日が上）にソートした配列を作成
@@ -131,7 +168,7 @@ function HistoryList() {
     });
   });
 
-  // 月全体のサマリー計算（厳格な文法に対応）
+  // サマリー計算
   let totalCount = 0;
   let totalTech = 0;
   let totalRepair = 0;
@@ -221,7 +258,6 @@ function HistoryList() {
   return (
     <div className="flex flex-col items-center w-full relative">
       
-      {/* 画面上部エリア */}
       <div className="w-[92%] max-w-md mt-6 mb-4">
         <div className="bg-[#eaaa43] rounded-[14px] py-3 px-4 shadow-sm flex items-center justify-between mb-3">
           <Link href="/report" className="text-white font-bold flex items-center w-16 active:scale-90 transition-transform">
@@ -244,22 +280,68 @@ function HistoryList() {
           </div>
         </div>
 
-        {/* 月選択ピッカー */}
-        <div className="bg-white rounded-[14px] p-3 shadow-sm flex justify-between items-center border border-gray-100">
-          <span className="text-sm font-bold text-gray-500 ml-1">表示月を選択</span>
-          <input 
-            type="month" 
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-gray-800 outline-none focus:border-[#eaaa43] focus:ring-1 focus:ring-[#eaaa43] transition-all"
-          />
+        {/* 検索・絞り込みエリア */}
+        <div className="bg-white rounded-[14px] p-3 shadow-sm flex flex-col gap-3 border border-gray-100">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-gray-500 ml-1">表示月を選択</span>
+            <div className="relative">
+              <select 
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-sm font-bold text-gray-800 outline-none focus:border-[#eaaa43] focus:ring-1 focus:ring-[#eaaa43] transition-all appearance-none cursor-pointer"
+              >
+                {monthOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <svg className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+          </div>
+          
+          <div className="h-px bg-gray-100 w-full"></div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-gray-500 ml-1">フリーワード検索</span>
+            <div className="relative">
+              <svg className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              <input 
+                type="text" 
+                placeholder="場所、内容、メモ..."
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm font-bold text-gray-800 outline-none focus:border-[#eaaa43] focus:ring-1 focus:ring-[#eaaa43] transition-all w-[150px]"
+              />
+            </div>
+          </div>
+
+          <div className="h-px bg-gray-100 w-full"></div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-gray-500 ml-1">日付で検索</span>
+            <div className="relative">
+              <input 
+                type="date" 
+                value={searchDate}
+                onChange={(e) => setSearchDate(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-gray-800 outline-none focus:border-[#eaaa43] focus:ring-1 focus:ring-[#eaaa43] transition-all w-[150px]"
+              />
+              {searchDate && (
+                <button 
+                  onClick={() => setSearchDate("")}
+                  className="absolute right-[-24px] top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 bg-gray-100 rounded-full w-5 h-5 flex items-center justify-center -ml-2 text-xs"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* サマリーカード */}
       <div className="w-[92%] max-w-md bg-white rounded-[16px] shadow-[0_2px_10px_rgba(0,0,0,0.04)] p-4 mb-4">
         <div className="flex justify-between items-center mb-3 border-b border-gray-100 pb-2">
-          <div className="text-gray-500 font-bold text-sm">📅 {selectedMonthDisplay} の実績</div>
+          <div className="text-gray-500 font-bold text-sm">📅 {selectedMonth === "all" ? "全期間" : selectedMonthDisplay} の実績</div>
           <div className="text-[#eaaa43] font-black text-lg">{totalCount}<span className="text-xs ml-1 font-bold text-gray-400">件</span></div>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
@@ -278,7 +360,7 @@ function HistoryList() {
         </div>
       </div>
 
-      {/* リストエリア（2段階アコーディオン） */}
+      {/* リストエリア */}
       <div className="w-[92%] max-w-md flex flex-col gap-3">
         {isLoading ? (
           <div className="text-center py-10 text-gray-400 font-bold text-sm animate-pulse">データを読み込んでいます...</div>
@@ -287,7 +369,7 @@ function HistoryList() {
         ) : sortedDates.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-[16px] shadow-sm border border-dashed border-gray-200">
             <span className="text-4xl mb-3 block opacity-50">📭</span>
-            <p className="text-gray-400 font-bold text-sm">{selectedMonthDisplay} の日報はありません</p>
+            <p className="text-gray-400 font-bold text-sm">{selectedMonth === "all" ? "データ" : selectedMonthDisplay + " の日報"} はありません</p>
           </div>
         ) : (
           sortedDates.map((dateStr) => {
@@ -301,7 +383,6 @@ function HistoryList() {
             return (
               <div key={dateStr} className="bg-white rounded-[16px] shadow-sm border border-gray-100 overflow-hidden">
                 
-                {/* 1段階目：日付ヘッダー */}
                 <div 
                   className={`p-4 cursor-pointer flex justify-between items-center transition-colors ${isDateExpanded ? 'bg-orange-50/50 border-b border-gray-100' : 'bg-white'}`}
                   onClick={() => setExpandedDate(isDateExpanded ? null : dateStr)}
@@ -326,7 +407,6 @@ function HistoryList() {
                   </div>
                 </div>
 
-                {/* 2段階目：その日の案件リスト */}
                 {isDateExpanded && (
                   <div className="p-3 bg-gray-50/50 flex flex-col gap-2.5 animate-fade-in">
                     {dayItems.map((item, index) => {
@@ -334,14 +414,25 @@ function HistoryList() {
                       const isItemExpanded = expandedItemKey === itemKey;
                       const isContracted = item.メモ && item.メモ.includes('成約');
                       const isHighway = item.遠隔高速利用 === '有';
+                      const isProposal = item.提案有無 === '有';
+
+                      // グラデーションの出し分け
+                      let wrapperClass = "p-0 bg-transparent";
+                      if (isContracted && isProposal) {
+                        wrapperClass = "p-[2.5px] bg-gradient-to-br from-red-400 via-yellow-300 via-green-400 via-blue-400 to-purple-500 shadow-[0_0_15px_rgba(234,170,67,0.4)]";
+                      } else if (isContracted) {
+                        wrapperClass = "p-[2px] bg-gradient-to-r from-red-400 via-yellow-400 via-green-400 via-blue-400 to-purple-400";
+                      } else if (isProposal) {
+                        wrapperClass = "p-[2px] bg-gradient-to-br from-yellow-200 via-[#eaaa43] to-orange-400 shadow-sm";
+                      }
 
                       return (
                         <div 
                           key={itemKey} 
                           onClick={(e) => { e.stopPropagation(); setExpandedItemKey(isItemExpanded ? null : itemKey); }}
-                          className={`rounded-[12px] shadow-sm relative cursor-pointer transition-all duration-300 ${isContracted ? 'p-[2px] bg-gradient-to-r from-red-400 via-yellow-400 via-green-400 via-blue-400 to-purple-400' : 'p-0 bg-transparent'}`}
+                          className={`rounded-[12px] shadow-sm relative cursor-pointer transition-all duration-300 ${wrapperClass}`}
                         >
-                          <div className={`rounded-[10px] p-3 w-full relative overflow-hidden flex flex-col gap-1.5 ${isHighway ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'} ${isContracted && !isHighway ? 'border-none' : 'border'}`}>
+                          <div className={`rounded-[10px] p-3 w-full relative overflow-hidden flex flex-col gap-1.5 ${isHighway ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'} ${(isContracted || isProposal) && !isHighway ? 'border-none' : 'border'}`}>
                             
                             {isHighway && (
                               <div className="absolute right-[-10px] top-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center transform -rotate-12 opacity-40 text-blue-400">
@@ -378,6 +469,8 @@ function HistoryList() {
                             <div className="flex justify-between items-end mt-1 relative z-10">
                               <div className="flex gap-1.5 flex-wrap">
                                 {isContracted && <span className="bg-gradient-to-r from-red-500 to-purple-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm">成約</span>}
+                                {isProposal && <span className="bg-[#eaaa43] text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-[#d4932d]">提案あり</span>}
+                                {isProposal && item.提案内容 && <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-orange-200">提案品: {item.提案内容}</span>}
                                 {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">高速: {item.伝票番号}</span>}
                               </div>
                               <div className="flex gap-2.5 text-[11px] font-black">
@@ -387,7 +480,6 @@ function HistoryList() {
                               </div>
                             </div>
 
-                            {/* 案件ごとの詳細（アコーディオン内アコーディオン） */}
                             {isItemExpanded && (
                               <div className={`mt-3 pt-3 border-t ${isHighway ? 'border-blue-200' : 'border-gray-100'} text-[11px] space-y-2 animate-fade-in relative z-10 cursor-default`} onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-between">
@@ -411,7 +503,6 @@ function HistoryList() {
                                   </div>
                                 )}
 
-                                {/* 編集ボタン */}
                                 <div className="pt-2 flex justify-end">
                                   <button 
                                     onClick={(e) => openEditModal(e, item)}
@@ -423,23 +514,18 @@ function HistoryList() {
                                 </div>
                               </div>
                             )}
-
                           </div>
                         </div>
                       );
                     })}
                   </div>
                 )}
-
               </div>
             );
           })
         )}
       </div>
 
-      {/* =========================================
-          フルスクリーン エディット（編集）モーダル 
-      ========================================= */}
       {editingItem && (
         <div className="fixed inset-0 bg-[#f8f6f0] z-[100] overflow-y-auto pb-32 flex flex-col items-center">
           <div className="w-[92%] max-w-md mt-6 mb-4 sticky top-6 z-20">
@@ -460,7 +546,6 @@ function HistoryList() {
           )}
 
           <form onSubmit={handleEditSubmit} className="w-[92%] max-w-md flex flex-col gap-5">
-            {/* 01 基本情報 */}
             <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-6">
               <div className="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
                 <h2 className="text-[1.1rem] font-bold text-[#eaaa43] tracking-wider">基本情報</h2>
@@ -492,7 +577,6 @@ function HistoryList() {
               </div>
             </div>
 
-            {/* 02 業務詳細 */}
             <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-6">
               <div className="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
                 <h2 className="text-[1.1rem] font-bold text-[#eaaa43] tracking-wider">業務詳細</h2>
@@ -543,7 +627,6 @@ function HistoryList() {
               </div>
             </div>
 
-            {/* 03 金額 */}
             <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-6">
               <div className="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
                 <h2 className="text-[1.1rem] font-bold text-[#eaaa43] tracking-wider">金額</h2>
@@ -586,7 +669,6 @@ function HistoryList() {
               </div>
             </div>
 
-            {/* 04 提案 */}
             <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-6">
               <div className="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
                 <h2 className="text-[1.1rem] font-bold text-[#eaaa43] tracking-wider">提案</h2>
@@ -620,7 +702,6 @@ function HistoryList() {
               </div>
             </div>
 
-            {/* 05 ステータス */}
             <div className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] p-6">
               <div className="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
                 <h2 className="text-[1.1rem] font-bold text-[#eaaa43] tracking-wider">ステータス</h2>
@@ -655,7 +736,6 @@ function HistoryList() {
               </div>
             </div>
 
-            {/* 上書き保存ボタン */}
             <button type="submit" disabled={isSubmitting} className="w-full bg-[#eaaa43] text-white rounded-[14px] py-4 shadow-sm active:scale-95 transition-transform font-black text-base mt-2 tracking-widest disabled:bg-gray-400">
               {isSubmitting ? '保存中...' : '内容を上書き保存する'}
             </button>
@@ -667,8 +747,6 @@ function HistoryList() {
   );
 }
 
-// --- メインページ（Suspenseラップ） ---
-// ★ 修正：Next.jsの厳格なPageコンポーネントの型に合わせるため、名前を Page に変更し props を許可
 export default function Page(props: any) {
   return (
     <div className="min-h-screen bg-[#f8f6f0] font-sans text-slate-800 pb-32">
@@ -676,7 +754,6 @@ export default function Page(props: any) {
         <HistoryList />
       </Suspense>
 
-      {/* 画面下のタブバー */}
       <div className="fixed bottom-0 left-0 right-0 w-full bg-white rounded-t-[30px] shadow-[0_-4px_20px_rgba(0,0,0,0.04)] h-[70px] flex justify-around items-center px-4 max-w-md mx-auto pb-2 z-40">
         <Link href="/report" className="p-2 cursor-pointer relative">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#b0b0b0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
