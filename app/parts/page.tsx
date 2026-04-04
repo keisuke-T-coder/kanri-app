@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Filter, PackageOpen, AlertTriangle, AlertCircle, CheckCircle, ChevronDown, PackagePlus, ArrowLeft, Loader2, Home, Settings, Wrench, X, Calculator, Save } from 'lucide-react';
-import { Part, Staff } from '../../types/schema';
+import { Search, Plus, Filter, PackageOpen, AlertTriangle, AlertCircle, CheckCircle, ChevronDown, ChevronRight, PackagePlus, ArrowLeft, Loader2, Home, Settings, Wrench, X, Calculator, Save } from 'lucide-react';
+import { Part, Staff } from '../types/schema';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
