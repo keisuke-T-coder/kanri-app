@@ -24,52 +24,80 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 24, color: '#333' }
 });
 
-const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total }: any) => (
-  <Document>
-    <Page size="A4" style={styles.page}>
-      <Text style={styles.header}>御 見 積 書</Text>
-      
-      <View style={styles.clientInfo}>
-        <Text style={styles.clientName}>{caseData?.clientName || "お客様"} 様</Text>
-        <Text style={styles.meta}>受付番号: {caseData?.receiptNo || "未発行"}</Text>
-        <Text style={styles.meta}>対象機器: {caseData?.targetProduct} ({caseData?.targetProductCode})</Text>
-        <Text style={styles.meta}>現場住所: {caseData?.visitAddress}</Text>
-      </View>
+const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total, disposalFee, discountRate, quoteInfo }: any) => {
+  const partsTotalRaw = parts.reduce((sum: number, p: any) => sum + (Number(p.price) * Number(p.quantity)), 0);
+  const discountAmount = Math.round(partsTotalRaw * (Number(discountRate || 0) / 100));
+  const partsTotalDiscounted = partsTotalRaw - discountAmount;
 
-      <View style={styles.section}>
-        <View style={styles.tableHeader}>
-          <Text style={styles.colItem}>項目 / 部品名</Text>
-          <Text style={styles.colQty}>数量</Text>
-          <Text style={styles.colPrice}>金額(円)</Text>
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        <Text style={styles.header}>御 見 積 書</Text>
+        
+        <View style={styles.clientInfo}>
+          <Text style={styles.clientName}>{quoteInfo?.recipient || caseData?.clientName || "お客様"} 様</Text>
+          <Text style={styles.meta}>受付番号: {caseData?.receiptNo || "未発行"}</Text>
+          <Text style={styles.meta}>工事名: {quoteInfo?.project || caseData?.targetProduct}</Text>
+          <Text style={styles.meta}>現場住所: {quoteInfo?.site || caseData?.visitAddress}</Text>
         </View>
 
-        {parts.map((p: any, idx: number) => (
-          <View style={styles.row} key={idx}>
-            <Text style={styles.colItem}>{p.partName || "部品"} ({p.partCode})</Text>
-            <Text style={styles.colQty}>{p.quantity}</Text>
-            <Text style={styles.colPrice}>{Number(p.price).toLocaleString()}</Text>
+        <View style={styles.section}>
+          <View style={styles.tableHeader}>
+            <Text style={styles.colItem}>項目 / 部品名</Text>
+            <Text style={styles.colQty}>数量</Text>
+            <Text style={styles.colPrice}>金額(円)</Text>
           </View>
-        ))}
-        
-        <View style={styles.row}>
-          <Text style={styles.colItem}>基本技術料</Text>
-          <Text style={styles.colQty}>1</Text>
-          <Text style={styles.colPrice}>{Number(technicalFee).toLocaleString()}</Text>
+
+          {parts.map((p: any, idx: number) => (
+            <View style={styles.row} key={idx}>
+              <Text style={styles.colItem}>{p.partName || "部品"} ({p.partCode})</Text>
+              <Text style={styles.colQty}>{p.quantity}</Text>
+              <Text style={styles.colPrice}>{Number(p.price).toLocaleString()}</Text>
+            </View>
+          ))}
+          
+          <View style={styles.row}>
+            <Text style={styles.colItem}>部品代小計</Text>
+            <Text style={styles.colQty}>1</Text>
+            <Text style={styles.colPrice}>{partsTotalRaw.toLocaleString()}</Text>
+          </View>
+
+          {discountRate > 0 && (
+            <View style={styles.row}>
+              <Text style={[styles.colItem, { color: '#e44' }]}>値引き ({discountRate}%)</Text>
+              <Text style={styles.colQty}>1</Text>
+              <Text style={[styles.colPrice, { color: '#e44' }]}>-{discountAmount.toLocaleString()}</Text>
+            </View>
+          )}
+
+          <View style={styles.row}>
+            <Text style={styles.colItem}>基本技術料</Text>
+            <Text style={styles.colQty}>1</Text>
+            <Text style={styles.colPrice}>{Number(technicalFee).toLocaleString()}</Text>
+          </View>
+          
+          <View style={styles.row}>
+            <Text style={styles.colItem}>出張費</Text>
+            <Text style={styles.colQty}>1</Text>
+            <Text style={styles.colPrice}>{Number(travelFee).toLocaleString()}</Text>
+          </View>
+
+          {disposalFee > 0 && (
+            <View style={styles.row}>
+              <Text style={styles.colItem}>処分料</Text>
+              <Text style={styles.colQty}>1</Text>
+              <Text style={styles.colPrice}>{Number(disposalFee).toLocaleString()}</Text>
+            </View>
+          )}
         </View>
         
-        <View style={styles.row}>
-          <Text style={styles.colItem}>出張費</Text>
-          <Text style={styles.colQty}>1</Text>
-          <Text style={styles.colPrice}>{Number(travelFee).toLocaleString()}</Text>
+        <View style={styles.totalBox}>
+          <Text style={styles.totalLabel}>御見積合計金額（税込）</Text>
+          <Text style={styles.totalValue}>¥{Number(total).toLocaleString()}</Text>
         </View>
-      </View>
-      
-      <View style={styles.totalBox}>
-        <Text style={styles.totalLabel}>御見積合計金額（税込）</Text>
-        <Text style={styles.totalValue}>¥{Number(total).toLocaleString()}</Text>
-      </View>
-    </Page>
-  </Document>
-);
+      </Page>
+    </Document>
+  );
+};
 
 export default QuotePDF;
