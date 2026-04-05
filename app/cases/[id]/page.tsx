@@ -14,6 +14,8 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
   const [caseData, setCaseData] = useState<any>(null);
   const [editData, setEditData] = useState<any>(null);
   const [parts, setParts] = useState<any[]>([]);
+  const [editingPartId, setEditingPartId] = useState<string | null>(null);
+  const [editingPartData, setEditingPartData] = useState<any>(null);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [visits, setVisits] = useState<any[]>([]);
   const [showBulkInput, setShowBulkInput] = useState(false);
@@ -212,6 +214,28 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
       }
     } catch (error) {
       console.error(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdatePart = async () => {
+    if (!editingPartData) return;
+    if (!confirm("部品情報をこの内容で更新しますか？")) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/gas-new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "saveParts", payload: [editingPartData] })
+      });
+      if (res.ok) {
+        setParts(parts.map(p => p.id === editingPartId ? editingPartData : p));
+        setEditingPartId(null);
+        setEditingPartData(null);
+      }
+    } catch (error) {
+      alert("更新に失敗しました。");
     } finally {
       setSaving(false);
     }
@@ -460,19 +484,75 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
           <div className="text-center py-10 bg-white rounded-[24px] shadow-[0_4px_20px_rgba(0,0,0,0.02)] text-[10px] text-gray-300 font-bold border border-dashed border-gray-100 uppercase tracking-widest">No Parts Selected</div>
         ) : (
           parts.map(p => (
-            <div key={p.id} className="bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex justify-between items-center border border-transparent hover:border-[#eaaa43]/30 transition-all group">
-               <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-gray-50 rounded-xl group-hover:bg-orange-50 transition-colors">
-                    <Wrench size={16} className="text-gray-400 group-hover:text-[#eaaa43]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-gray-800">{p.partName || "部品名未定"}</p>
-                    <p className="text-[10px] text-gray-400 font-medium">品番: {p.partCode} / {p.quantity}個 / ¥{Number(p.price).toLocaleString()}</p>
-                  </div>
-               </div>
-               <button onClick={() => deletePart(p.id)} className="p-2.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90">
-                 <Trash2 size={15} />
-               </button>
+            <div key={p.id} className="bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col gap-4 border border-transparent hover:border-[#eaaa43]/30 transition-all group">
+               {editingPartId === p.id ? (
+                 <div className="flex flex-col gap-3">
+                   <div className="flex justify-between items-center px-1">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Editing Part</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => setEditingPartId(null)} className="p-1.5 bg-gray-100 text-gray-400 rounded-lg hover:bg-gray-200 transition-colors"><X size={14}/></button>
+                        <button onClick={handleUpdatePart} className="p-1.5 bg-[#eaaa43] text-white rounded-lg hover:brightness-105 transition-all"><Check size={14}/></button>
+                      </div>
+                   </div>
+                   <input className="w-full bg-gray-50 p-4 rounded-2xl text-base font-black outline-none border-2 border-transparent focus:border-[#eaaa43] transition-all" value={editingPartData.partName} onChange={e => setEditingPartData({...editingPartData, partName: e.target.value})} placeholder="部品名" />
+                   
+                   <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-black text-gray-400 ml-1 uppercase tracking-widest">型番 / Model Number</p>
+                        <input className="w-full bg-gray-50 p-4 rounded-2xl text-sm font-bold outline-none border border-gray-100 focus:border-[#eaaa43] transition-all" value={editingPartData.partCode} onChange={e => setEditingPartData({...editingPartData, partCode: e.target.value})} placeholder="型番を入力" />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-black text-gray-400 ml-1 uppercase tracking-widest">数量 / Qty</p>
+                          <input 
+                            type="number" 
+                            min="1"
+                            step="1"
+                            className="w-full bg-white p-4 rounded-2xl text-lg font-black outline-none border-2 border-gray-100 focus:border-[#eaaa43] transition-all" 
+                            value={editingPartData.quantity ?? ""} 
+                            onChange={e => {
+                               const val = e.target.value === "" ? "" : Number(e.target.value);
+                               setEditingPartData({...editingPartData, quantity: val});
+                            }} 
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-black text-gray-400 ml-1 uppercase tracking-widest">単価 / Price (¥)</p>
+                          <input 
+                            type="number" 
+                            className="w-full bg-white p-4 rounded-2xl text-lg font-black outline-none text-right border-2 border-gray-100 focus:border-[#eaaa43] transition-all" 
+                            value={editingPartData.price ?? ""} 
+                            onChange={e => {
+                               const val = e.target.value === "" ? "" : Number(e.target.value);
+                               setEditingPartData({...editingPartData, price: val});
+                            }} 
+                          />
+                        </div>
+                      </div>
+                   </div>
+                 </div>
+               ) : (
+                 <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                       <div className="p-2.5 bg-gray-50 rounded-xl group-hover:bg-orange-50 transition-colors">
+                         <Wrench size={16} className="text-gray-400 group-hover:text-[#eaaa43]" />
+                       </div>
+                       <div>
+                         <p className="text-sm font-black text-gray-800">{p.partName || "部品名未定"}</p>
+                         <p className="text-[10px] text-gray-400 font-medium">品番: {p.partCode} / {p.quantity}個 / ¥{Number(p.price).toLocaleString()}</p>
+                       </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <button onClick={() => {setEditingPartId(p.id); setEditingPartData(p);}} className="p-2.5 text-gray-300 hover:text-[#eaaa43] hover:bg-orange-50 rounded-xl transition-all active:scale-90">
+                         <Edit3 size={15} />
+                       </button>
+                       <button onClick={() => deletePart(p.id)} className="p-2.5 text-red-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90">
+                         <Trash2 size={15} />
+                       </button>
+                    </div>
+                 </div>
+               )}
             </div>
           ))
         )}

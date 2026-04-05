@@ -189,7 +189,11 @@ export default function QuotePage({ params }: { params: { id: string } }) {
   const partsTotalRaw = displayParts.reduce((sum, p) => sum + (Number(p.price) * Number(p.quantity)), 0);
   const partsDiscountAmount = Math.round(partsTotalRaw * (discountRate / 100));
   const partsTotalDiscounted = partsTotalRaw - partsDiscountAmount;
-  const totalAmount = partsTotalDiscounted + travelFee + technicalFee + disposalFee;
+  const liveTotalAmount = partsTotalDiscounted + travelFee + technicalFee + disposalFee;
+
+  // 重要: 表示・出力用の最終確定値（編集中でなければ保存済みデータ、編集中ならライブ計算値）
+  const effectiveTotal = (!isEditing && storedTotal !== null) ? storedTotal : liveTotalAmount;
+  const effectiveParts = displayParts;
 
   const handleSaveQuote = async () => {
     setSaving(true);
@@ -213,7 +217,7 @@ export default function QuotePage({ params }: { params: { id: string } }) {
         disposalFee,
         discountRate,
         partsTotal: partsTotalDiscounted,
-        totalAmount,
+        totalAmount: liveTotalAmount,
         mode,
         partsSnapshot: JSON.stringify(displayParts), 
         pdfUrl: JSON.stringify(displayParts) // 万が一新規カラムが反映されない場合の予備
@@ -240,8 +244,16 @@ export default function QuotePage({ params }: { params: { id: string } }) {
     const recipient = RECIPIENTS[recipientIndex];
     const subject = encodeURIComponent(`【御見積】${quoteProjectName}の修理・送付依頼`);
     const sendMethodStr = mode === "FAX" ? `FAX送信 (${caseData?.clientFax || "---"})` : "メール送信";
-    const partsDetailText = displayParts.map((p, i) => `${i + 1}. 品番: ${p.partCode}\n　品名: ${p.partName}\n　金額: ¥${Number(p.price).toLocaleString()}\n　数量: ${p.quantity}`).join("\n");
-    const bodyText = `${recipient.name} さんお疲れ様です。\n\n${mode === "FAX" ? "見積り作成送付をFAXにてお願い致します。" : `見積り作成送付を、以下のメールアドレス宛てにPDFで送信をお願いします。\n【送信先】${customerEmail}`}\n\n受付No: ${caseData?.receiptNo || "未発行"}\n訪問先名: ${caseData?.clientName || "お客様"}\n見積り宛名: ${quoteRecipientName}\n担当: ${caseData?.clientContactName || "---"}\n現場名: ${quoteSiteName}\n工事名: ${quoteProjectName} ${quoteProjectExt}\n送付方法: ${sendMethodStr}\n\n【金額内訳】\n出張費: ¥${travelFee.toLocaleString()}\n技術料: ¥${technicalFee.toLocaleString()}\n${disposalFee > 0 ? `処分料: ¥${disposalFee.toLocaleString()}\n` : ""}部品代: ¥${partsTotalDiscounted.toLocaleString()} (値引き${discountRate}%適用後)\n小計: ¥${totalAmount.toLocaleString()}\n合計: ¥${totalAmount.toLocaleString()}（税込）\n\n【部品詳細】\n${partsDetailText}`.trim();
+    const partsDetailText = effectiveParts.map((p, i) => `${i + 1}. 品番: ${p.partCode}\n　品名: ${p.partName}\n　金額: ¥${Number(p.price).toLocaleString()}\n　数量: ${p.quantity}`).join("\n");
+    
+    // 内訳項目の構築
+    let costBreakdown = `出張費: ¥${travelFee.toLocaleString()}\n`;
+    costBreakdown += `技術料: ¥${technicalFee.toLocaleString()}\n`;
+    if (disposalFee > 0) costBreakdown += `処分料: ¥${disposalFee.toLocaleString()}\n`;
+    costBreakdown += `部品代: ¥${partsTotalRaw.toLocaleString()}\n`;
+    if (discountRate > 0) costBreakdown += `値引き: -¥${Math.round(partsTotalRaw * (discountRate/100)).toLocaleString()} (${discountRate}%)\n`;
+    
+    const bodyText = `${recipient.name} さんお疲れ様です。\n\n${mode === "FAX" ? "見積り作成送付をFAXにてお願い致します。" : `見積り作成送付を、以下のメールアドレス宛てにPDFで送信をお願いします。\n【送信先】${customerEmail}`}\n\n受付No: ${caseData?.receiptNo || "未発行"}\n訪問先名: ${caseData?.clientName || "お客様"}\n見積り宛名: ${quoteRecipientName}\n担当: ${caseData?.clientContactName || "---"}\n現場名: ${quoteSiteName}\n工事名: ${quoteProjectName} ${quoteProjectExt}\n送付方法: ${sendMethodStr}\n\n【金額内訳】\n${costBreakdown}合計: ¥${effectiveTotal.toLocaleString()}（税込）\n\n【部品詳細】\n${partsDetailText}`.trim();
     window.location.href = `mailto:${recipient.email}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
   };
 
@@ -397,7 +409,7 @@ export default function QuotePage({ params }: { params: { id: string } }) {
       <div className="flex items-center justify-center gap-1.5 mb-2 relative z-10 transition-transform group-hover:scale-105 duration-500">
         <span className="text-[26px] font-black text-orange-500 mt-[-16px]">¥</span>
         <p className="text-[64px] font-black text-slate-900 leading-none tracking-tighter">
-          {(!isEditing && storedTotal !== null) ? storedTotal.toLocaleString() : totalAmount.toLocaleString()}
+          {effectiveTotal.toLocaleString()}
         </p>
       </div>
       <p className="text-[9px] font-black text-slate-300 mt-4 uppercase tracking-widest">(税込 / Tax Included)</p>
@@ -435,7 +447,7 @@ export default function QuotePage({ params }: { params: { id: string } }) {
        </div>
        <div className="flex flex-col gap-4 pt-8 border-t border-slate-200/60">
          <div className="flex flex-col sm:flex-row gap-4">
-            <PDFDownloadLink document={<QuotePDF caseData={caseData} parts={displayParts} technicalFee={technicalFee} travelFee={travelFee} total={totalAmount} disposalFee={disposalFee} discountRate={discountRate} quoteInfo={{ recipient: quoteRecipientName, site: quoteSiteName, project: quoteProjectName + (quoteProjectExt ? " " + quoteProjectExt : "") }} />} fileName={`見積書_${quoteRecipientName}.pdf`} className="flex-1">
+            <PDFDownloadLink document={<QuotePDF caseData={caseData} parts={effectiveParts} technicalFee={technicalFee} travelFee={travelFee} total={effectiveTotal} disposalFee={disposalFee} discountRate={discountRate} quoteInfo={{ recipient: quoteRecipientName, site: quoteSiteName, project: quoteProjectName + (quoteProjectExt ? " " + quoteProjectExt : "") }} />} fileName={`見積書_${quoteRecipientName}.pdf`} className="flex-1">
               {({ loading }) => (
                 <button disabled={loading} className="w-full bg-white border-2 border-slate-900 text-slate-900 py-5 rounded-[26px] font-black text-xs flex justify-center items-center gap-2.5 hover:bg-slate-900 hover:text-white transition-all shadow-lg active:scale-95 disabled:opacity-50">
                   {loading ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} PDF保存

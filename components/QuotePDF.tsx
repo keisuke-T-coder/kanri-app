@@ -25,9 +25,8 @@ const styles = StyleSheet.create({
 });
 
 const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total, disposalFee, discountRate, quoteInfo }: any) => {
-  const partsTotalRaw = parts.reduce((sum: number, p: any) => sum + (Number(p.price) * Number(p.quantity)), 0);
+  const partsTotalRaw = (parts || []).reduce((sum: number, p: any) => sum + (Number(p.price || 0) * Number(p.quantity || 1)), 0);
   const discountAmount = Math.round(partsTotalRaw * (Number(discountRate || 0) / 100));
-  const partsTotalDiscounted = partsTotalRaw - discountAmount;
 
   return (
     <Document>
@@ -48,9 +47,9 @@ const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total, disposalFee
             <Text style={styles.colPrice}>金額(円)</Text>
           </View>
 
-          {parts.map((p: any, idx: number) => (
+          {(parts || []).map((p: any, idx: number) => (
             <View style={styles.row} key={idx}>
-              <Text style={styles.colItem}>{p.partName || "部品"} ({p.partCode})</Text>
+              <Text style={styles.colItem}>{p.partName || "部品"} ({p.partCode || "---"})</Text>
               <Text style={styles.colQty}>{p.quantity}</Text>
               <Text style={styles.colPrice}>{Number(p.price).toLocaleString()}</Text>
             </View>
@@ -62,7 +61,7 @@ const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total, disposalFee
             <Text style={styles.colPrice}>{partsTotalRaw.toLocaleString()}</Text>
           </View>
 
-          {discountRate > 0 && (
+          {Number(discountRate) > 0 && (
             <View style={styles.row}>
               <Text style={[styles.colItem, { color: '#e44' }]}>値引き ({discountRate}%)</Text>
               <Text style={styles.colQty}>1</Text>
@@ -82,7 +81,7 @@ const QuotePDF = ({ caseData, parts, technicalFee, travelFee, total, disposalFee
             <Text style={styles.colPrice}>{Number(travelFee).toLocaleString()}</Text>
           </View>
 
-          {disposalFee > 0 && (
+          {Number(disposalFee) > 0 && (
             <View style={styles.row}>
               <Text style={styles.colItem}>処分料</Text>
               <Text style={styles.colQty}>1</Text>
