@@ -343,23 +343,14 @@ export default function PartsPage() {
         </div>
       )}
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200/60 pb-2 sm:pb-4 z-40">
-        <div className="flex justify-around items-center h-16 max-w-3xl mx-auto px-2">
-          <Link href="/" className="flex flex-col items-center justify-center w-full h-full space-y-1 text-slate-400 hover:text-blue-600 transition-colors">
-            <Home size={22} />
-            <span className="text-[10px] font-bold">ホーム</span>
-          </Link>
-          <Link href="/cases" className="flex flex-col items-center justify-center w-full h-full space-y-1 text-slate-400 hover:text-blue-600 transition-colors">
-            <Wrench size={22} />
-            <span className="text-[10px] font-bold">案件管理</span>
-          </Link>
-          <div className="relative flex flex-col items-center justify-center w-full h-full space-y-1 text-blue-600 transition-colors pointer-events-none">
-             <Settings size={22} />
-            <span className="text-[10px] font-bold">部品・在庫</span>
-            <div className="absolute top-2 right-1/4 w-2 h-2 bg-blue-500 rounded-full border-2 border-white animate-pulse"></div>
+      {/* --- ホームへ戻る専用ボタン --- */}
+      <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
+        <Link href="/" className="pointer-events-auto bg-white/90 backdrop-blur-lg border border-orange-100/50 px-10 py-3.5 rounded-[22px] shadow-[0_10px_40px_rgba(0,0,0,0.08)] flex items-center gap-3 group active:scale-95 transition-all text-[#eaaa43]">
+          <div className="w-8 h-8 bg-orange-50 rounded-full flex items-center justify-center group-hover:bg-[#eaaa43] group-hover:text-white transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
           </div>
-        </div>
+          <span className="font-black text-[15px] tracking-[0.2em] pt-0.5">ホームに戻る</span>
+        </Link>
       </div>
     </div>
   );

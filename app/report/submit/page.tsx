@@ -250,7 +250,18 @@ function SubmitReportContent() {
                 </div>
                 
                 <div className="flex-1 pl-1.5 pr-1 overflow-hidden">
-                  <div className="flex items-center gap-1 mb-[2px]">
+                  <div className="flex items-center gap-1.5 mb-[2px] overflow-hidden">
+                    {r.クライアント && r.クライアント !== '(-----)' && r.クライアント !== '-' && (
+                      <span className={`text-[7.5px] px-1 py-[1.5px] rounded border shrink-0 ${
+                        ["リビング", "ハウス"].includes(r.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
+                        ["トータルサービス", "タカギ"].includes(r.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
+                        ["崎山不動産", "ひだまり"].includes(r.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
+                        r.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                        "bg-gray-100 text-gray-500 border-gray-200"
+                      }`}>
+                        {r.クライアント}
+                      </span>
+                    )}
                     <span className="text-[11px] font-black text-gray-800 truncate leading-none pt-0.5">{r.訪問先}</span>
                     <span className="text-[7.5px] text-gray-400 font-bold border border-gray-200 rounded px-1 leading-none py-[2px] whitespace-nowrap bg-gray-50">
                       {r.エリア?.replace('エリア', '') || ''}
