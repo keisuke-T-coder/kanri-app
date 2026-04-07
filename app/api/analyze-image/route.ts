@@ -29,19 +29,20 @@ export async function POST(req: Request) {
       {
         "receiptNo": "受付番号",
         "receiptDate": "受付日(YYYY-MM-DD)",
-        "contactTel": "連絡先TEL",
+        "contactName": "連絡先名",
+        "visitName": "訪問先名",
         "visitTel": "訪問先TEL",
         "visitAddress": "訪問先住所",
+        "contactTel": "連絡先TEL",
         "targetProduct": "対象商品（品目）",
         "targetProductCode": "対象商品（品番）",
         "usageStartDate": "使用開始年月",
+        "serialNo": "製造番号",
         "requestDetails": "依頼内容",
         "clientMessage": "依頼元メッセージ",
-        "clientCategory": "依頼分類",
         "clientName": "依頼元",
         "clientTel": "依頼元TEL",
-        "clientFax": "依頼元FAX",
-        "clientOrderNo": "依頼元注番"
+        "clientFax": "依頼元FAX"
       }`
       : `あなたは業務アシスタントです。添付された部品発注書またはラベル画像から以下の情報を抽出し、JSON形式でのみ出力してください。JSON全体を{}で囲み、余計なマークダウンや説明は省いてください。
       {

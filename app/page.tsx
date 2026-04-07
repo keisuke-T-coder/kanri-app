@@ -3,6 +3,7 @@
 import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Wrench } from 'lucide-react';
 
 export default function Home() {
   const router = useRouter();
@@ -14,7 +15,6 @@ export default function Home() {
     setSelectedWorker(worker);
   }, []);
 
-  // ★ 追加：未実装のボタンを押したときのアラート処理
   const handleComingSoon = (e: React.MouseEvent) => {
     e.preventDefault();
     alert("Coming soon...\n現在開発中です。次回アップデートをお待ちください。");
