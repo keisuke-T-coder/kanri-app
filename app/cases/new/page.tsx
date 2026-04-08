@@ -104,7 +104,7 @@ export default function NewCasePage() {
       const res = await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveCases", payload: bulkData })
+        body: JSON.stringify({ action: "saveCases", sheetName: "Cases", payload: bulkData })
       });
       if (!res.ok) throw new Error("一括保存に失敗しました");
       
@@ -151,7 +151,7 @@ export default function NewCasePage() {
       const res = await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveCase", payload: finalPayload })
+        body: JSON.stringify({ action: "saveCase", sheetName: "Cases", payload: finalPayload })
       });
       if (!res.ok) throw new Error("保存に失敗しました");
       router.push(`/cases/${formData.id}`);

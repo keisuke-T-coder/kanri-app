@@ -2,14 +2,15 @@
 import React, { useEffect, useState } from "react";
 import Link from 'next/link';
 import { useRouter } from "next/navigation";
-import { Plus, ChevronRight, FileText, Wrench, MapPin, ArrowLeft, Edit3, Clock, Check, X, Loader2 } from "lucide-react";
+import { Plus, ChevronRight, FileText, Wrench, MapPin, ArrowLeft, Edit3, Clock, Check, X, Loader2, RotateCcw } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 
 export default function CasesPage() {
   const router = useRouter();
   const [cases, setCases] = useState<any[]>([]);
+  const [visits, setVisits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("未完了");
 
   // Quick Action States
@@ -23,20 +24,91 @@ export default function CasesPage() {
   const tabs = ["未完了", "部品待ち", "見積り待ち", "問い合わせ待ち", "完了"];
 
   useEffect(() => {
+    // 1. 初回マウント時にキャッシュを読み込んで即座に表示を許可する
+    const cachedCases = localStorage.getItem("cases_cache");
+    const cachedVisits = localStorage.getItem("visits_cache");
+    
+    if (cachedCases) {
+      setCases(JSON.parse(cachedCases));
+      // キャッシュがあれば初期表示の「読み込み中...」をスキップする
+      setLoading(false);
+    }
+    if (cachedVisits) setVisits(JSON.parse(cachedVisits));
+    
+    // 2. 最新データをフェッチ（バックグラウンドで開始）
     fetchCases();
   }, []);
 
-  const fetchCases = async () => {
+  const fetchCases = async (manual = false) => {
+    const hasCache = !!localStorage.getItem("cases_cache");
+    
+    if (manual) setRefreshing(true);
+    // キャッシュが全くない初動の時だけ全画面ローディングを出す
+    else if (!hasCache) setLoading(true);
+
     try {
-      const res = await fetch("/api/gas-new?action=getCases");
-      if (res.ok) {
-        const data = await res.json();
-        setCases(data || []);
+      // 案件一覧の取得（高速）
+      const casesRes = await fetch("/api/gas-new?action=getCases");
+      let casesArray = [];
+      if (casesRes.ok) {
+        const data = await casesRes.json();
+        casesArray = Array.isArray(data) ? data : (data.cases || []);
+        setCases(casesArray);
+        localStorage.setItem("cases_cache", JSON.stringify(casesArray));
+        // 案件リストが揃った時点で一度ローディングを解除しても良い（ユーザーを待たせない）
+        setLoading(false);
+      }
+
+      // 訪問履歴の取得（低速）
+      // 案件リストの表示を妨げないよう、ここでの失敗は許容しつつ順次更新する
+      let visitsArray = [];
+      try {
+        const visitsRes = await fetch("/api/gas-new", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "getData", sheetName: "Visits" })
+        });
+        
+        if (visitsRes.ok) {
+          const vData = await visitsRes.json();
+          const temp = Array.isArray(vData) ? vData : (vData.data || vData.visits || []);
+          if (temp.length > 0 && !temp[0].receiptNo) {
+            visitsArray = temp;
+          }
+        }
+      } catch (e) {
+        console.error("Primary visits fetch failed, fallback will follow");
+      }
+
+      // 取得できなかった場合のフォールバック（複数のGETを試行）
+      if (visitsArray.length === 0) {
+        const getVariations = [
+          "/api/gas-new?action=getVisits",
+          "/api/gas-new?action=getData&sheetName=Visits"
+        ];
+        
+        for (const url of getVariations) {
+          const res = await fetch(url).catch(() => null);
+          if (res && res.ok) {
+            const vData = await res.json();
+            const temp = Array.isArray(vData) ? vData : (vData.data || vData.visits || []);
+            if (temp.length > 0 && !temp[0].receiptNo && (temp[0].caseId || temp[0].visitDate)) {
+              visitsArray = temp;
+              break;
+            }
+          }
+        }
+      }
+
+      if (visitsArray.length > 0) {
+        setVisits(visitsArray);
+        localStorage.setItem("visits_cache", JSON.stringify(visitsArray));
       }
     } catch (error) {
-      console.error("Failed to fetch cases:", error);
+      console.error("Failed to fetch data:", error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -56,7 +128,7 @@ export default function CasesPage() {
       await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveCase", payload: updatedCase })
+        body: JSON.stringify({ action: "saveCase", sheetName: "Cases", payload: updatedCase })
       });
 
       // 2. Add Work Log (if text exists)
@@ -83,10 +155,24 @@ export default function CasesPage() {
     }
   };
 
-  const filteredCases = cases.filter(c => {
-    if (activeTab === "未完了") return c.status === "未完了" || !c.status || c.status === "未対応";
-    return c.status === activeTab;
-  });
+  const filteredCases = cases
+    .filter(c => {
+      if (activeTab === "未完了") return c.status === "未完了" || !c.status || c.status === "未対応";
+      return c.status === activeTab;
+    })
+    .sort((a, b) => {
+      // 1. 次回訪問日が入っているものを優先（昇順：近い日程が上）
+      if (a.nextVisitDate && b.nextVisitDate) {
+        return a.nextVisitDate.localeCompare(b.nextVisitDate);
+      }
+      if (a.nextVisitDate) return -1;
+      if (b.nextVisitDate) return 1;
+
+      // 2. 次回訪問日がないものは、受付日（receiptDate）の降順（新しい順が上）
+      const dateA = a.receiptDate || "";
+      const dateB = b.receiptDate || "";
+      return dateB.localeCompare(dateA);
+    });
 
   return (
     <div className="min-h-screen bg-[#f8f6f0] flex flex-col items-center font-sans pb-32 relative overflow-hidden text-slate-800">
@@ -100,9 +186,18 @@ export default function CasesPage() {
              <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest mt-1">LTS Maintenance Hub</p>
            </div>
          </div>
-         <Link href="/cases/new" className="bg-white border-2 border-gray-900 text-gray-900 px-5 py-2.5 rounded-2xl font-black text-xs shadow-sm flex items-center gap-2 active:scale-95 transition-all hover:bg-gray-900 hover:text-white">
-            <Plus size={16} strokeWidth={3} /> 新規登録
-         </Link>
+          <div className="flex items-center gap-2">
+             <button 
+               onClick={() => fetchCases(true)}
+               disabled={refreshing}
+               className={`p-3 bg-white rounded-2xl shadow-sm border border-gray-100 transition-all active:scale-95 ${refreshing ? 'opacity-50' : 'hover:bg-gray-50'}`}
+             >
+                <RotateCcw size={18} className={`text-gray-400 ${refreshing ? 'animate-spin' : ''}`} />
+             </button>
+             <Link href="/cases/new" className="bg-white border-2 border-gray-900 text-gray-900 px-5 py-2.5 rounded-2xl font-black text-xs shadow-sm flex items-center gap-2 active:scale-95 transition-all hover:bg-gray-900 hover:text-white">
+                <Plus size={16} strokeWidth={3} /> 新規登録
+             </Link>
+          </div>
       </div>
 
       <div className="w-[92%] max-w-md mb-6 sticky top-4 z-40">
@@ -179,48 +274,63 @@ export default function CasesPage() {
                   </div>
                 </div>
 
-                <div className="bg-gray-50/50 p-4 rounded-2xl flex flex-col gap-2 relative z-10 border border-gray-100/50" onClick={() => router.push(`/cases/${c.id}`)}>
-                  <p className="text-[11px] text-gray-600 font-bold flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-[#eaaa43] rounded-full" />
-                    {c.targetProduct || "未設定"}
-                  </p>
-                  <p className="text-[10px] text-gray-400 font-bold leading-relaxed line-clamp-2">
-                    {c.requestDetails || "詳細な依頼内容はありません。"}
-                  </p>
+                <div className="bg-gray-50/50 p-5 rounded-[22px] flex flex-col gap-3 relative z-10 border border-gray-100/50 group-hover:bg-orange-50/20 transition-colors" onClick={() => router.push(`/cases/${c.id}`)}>
+                   <div className="flex items-center justify-between mb-1">
+                      <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{c.targetProduct || "製品情報なし"}</p>
+                      <div className="flex items-center gap-1.5">
+                         <Clock size={10} className="text-orange-300" />
+                         <span className="text-[9px] font-bold text-orange-400">訪問履歴</span>
+                      </div>
+                   </div>
+                   
+                   <div className="space-y-2.5">
+                      {visits && visits.filter(v => (v.caseId || v.caseid || v.CASEID) === c.id)
+                        .sort((a, b) => new Date(b.visitDate || b.visitdate || 0).getTime() - new Date(a.visitDate || a.visitdate || 0).getTime())
+                        .slice(0, 3)
+                        .map((v, idx) => {
+                           const vDate = v.visitDate || v.visitdate || "";
+                           const vDetails = v.details || v.description || "";
+                           return (
+                             <div key={idx} className="flex gap-2.5 items-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                                <span className="text-[9px] font-black text-[#eaaa43] bg-orange-50 px-2 py-1 rounded-lg leading-none mt-0.5 whitespace-nowrap">
+                                  {vDate ? vDate.split('T')[0].slice(5).replace('-', '/') : '--/--'}
+                                </span>
+                                <p className="text-[11px] text-gray-700 font-bold leading-tight line-clamp-2">{vDetails}</p>
+                             </div>
+                           );
+                        })
+                      }
+                      {(!visits || visits.filter(v => (v.caseId || v.caseid || v.CASEID) === c.id).length === 0) && (
+                         <div className="py-2 px-1">
+                           <p className="text-[10px] text-gray-400 font-bold leading-relaxed italic line-clamp-2">
+                             {c.requestDetails || "詳細な依頼内容はありません。"}
+                           </p>
+                         </div>
+                      )}
+                   </div>
                 </div>
                 
                 {/* Action Buttons */}
-                <div className="flex flex-col gap-2.5 mt-6 relative z-10 border-t border-gray-50 pt-5">
+                <div className="flex gap-2.5 mt-6 relative z-10">
                    <button 
                      onClick={(e) => {
                        e.stopPropagation();
                        router.push(`/cases/${c.id}`);
                      }}
-                     className="bg-gray-900 text-white w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-[10px] font-black shadow-lg shadow-gray-200 active:scale-95 transition-all"
+                     className="flex-[2] bg-gray-900 text-white py-4 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black shadow-lg shadow-gray-200 active:scale-95 transition-all"
                    >
                      詳細を見る <ChevronRight size={14} strokeWidth={3} />
                    </button>
-                   <div className="grid grid-cols-2 gap-2">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!c.visitAddress) return;
-                          window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.visitAddress)}`, "_blank");
-                        }}
-                        className="bg-white border-2 border-gray-900 text-gray-900 py-3 rounded-2xl flex items-center justify-center gap-2 text-[10px] font-black active:scale-95 transition-all hover:bg-gray-50"
-                      >
-                        <MapPin size={12} strokeWidth={3} /> マップ
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenQuickModal(c);
-                        }}
-                        className="bg-[#eaaa43] text-white py-3 rounded-2xl flex items-center justify-center gap-2 text-[10px] font-black shadow-lg shadow-orange-100 active:scale-95 transition-all"
-                      >
-                        <Edit3 size={12} strokeWidth={3} /> クイック入力
-                      </button>
-                   </div>
+                   <button 
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       if (!c.visitAddress) return;
+                       window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.visitAddress)}`, "_blank");
+                     }}
+                     className="flex-1 bg-white border-2 border-gray-900 text-gray-900 py-3 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black active:scale-95 transition-all hover:bg-gray-50"
+                   >
+                     <MapPin size={12} strokeWidth={3} /> マップ
+                   </button>
                 </div>
               </div>
             </div>
@@ -228,94 +338,6 @@ export default function CasesPage() {
         )}
       </div>
 
-      {/* Quick Action Modal Overlay */}
-      {isQuickModalOpen && (
-         <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="w-full max-w-sm bg-white rounded-[40px] shadow-2xl p-8 animate-in zoom-in-95 slide-in-from-bottom-10 duration-300 relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-4">
-                  <button onClick={() => setIsQuickModalOpen(false)} className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 active:scale-90 transition-all"><X size={20}/></button>
-               </div>
-
-               <div className="flex flex-col gap-6">
-                  <div className="mb-2">
-                     <p className="text-[10px] font-black text-gray-400 tracking-widest uppercase mb-1">{selectedCase?.receiptNo || selectedCase?.id?.slice(0,8)}</p>
-                     <h3 className="text-xl font-black text-gray-900 leading-tight">{selectedCase?.visitName || "クイック入力"}様</h3>
-                  </div>
-
-                  {/* Status Select */}
-                  <div>
-                    <label className="text-[10px] font-black text-gray-400 ml-1 tracking-widest uppercase">状況の更新</label>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                       {["未完了", "部品待ち", "見積り待ち", "完了"].map(s => (
-                          <button
-                             key={s}
-                             onClick={() => setQuickStatus(s)}
-                             className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${
-                                quickStatus === s
-                                  ? (
-                                    s === "完了" ? "bg-emerald-500 text-white" :
-                                    s === "部品待ち" ? "bg-purple-500 text-white" :
-                                    s === "見積り待ち" ? "bg-amber-500 text-white" :
-                                    "bg-orange-500 text-white"
-                                  )
-                                  : "bg-gray-50 text-gray-400"
-                             }`}
-                          >
-                             {s}
-                          </button>
-                       ))}
-                    </div>
-                  </div>
-
-                  {/* Next Visit Picker */}
-                  <div>
-                    <label className="text-[10px] font-black text-gray-400 ml-1 tracking-widest uppercase flex items-center gap-1">
-                      <Clock size={10} /> 次回予定
-                    </label>
-                    <input 
-                      type="datetime-local" 
-                      step="1800"
-                      value={quickNextVisit}
-                      onChange={(e) => setQuickNextVisit(e.target.value)}
-                      className="w-full mt-2 p-4 bg-gray-50 rounded-2xl text-xs font-black outline-none border border-transparent focus:border-[#eaaa43]"
-                    />
-                  </div>
-
-                  {/* Work Log Quick Presets */}
-                  <div>
-                    <label className="text-[10px] font-black text-gray-400 ml-1 tracking-widest uppercase mb-2 block">作業記録を追加</label>
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                       {["訪問", "部品交換", "連絡", "SMS連絡"].map(p => (
-                          <button
-                             key={p}
-                             onClick={() => setQuickLog(p)}
-                             className={`px-3 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                quickLog === p ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-400 border border-gray-100"
-                             }`}
-                          >
-                             {p}
-                          </button>
-                       ))}
-                    </div>
-                    <textarea 
-                      placeholder="詳細な記録を残す..."
-                      value={quickLog}
-                      onChange={(e) => setQuickLog(e.target.value)}
-                      className="w-full h-24 bg-gray-50 rounded-2xl p-4 text-xs font-medium outline-none resize-none"
-                    />
-                  </div>
-
-                  <button 
-                    onClick={handleSaveQuickAction}
-                    disabled={savingQuick}
-                    className="w-full bg-[#eaaa43] text-white py-5 rounded-[22px] font-black shadow-xl shadow-orange-100 flex items-center justify-center gap-3 active:scale-[0.98] transition-all disabled:opacity-50"
-                  >
-                    {savingQuick ? <Loader2 size={18} className="animate-spin" /> : <><Check size={18} strokeWidth={3} /> この内容で保存する</>}
-                  </button>
-               </div>
-            </div>
-         </div>
-      )}
 
       <div className="w-[92%] max-w-md mt-12 mb-10">
         <Link href="/" className="group flex items-center justify-center gap-3 py-5 rounded-3xl border-2 border-dashed border-gray-200 text-gray-400 hover:border-[#eaaa43] hover:text-[#eaaa43] transition-all">

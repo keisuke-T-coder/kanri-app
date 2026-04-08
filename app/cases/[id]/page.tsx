@@ -26,10 +26,30 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
   const [editingNextVisit, setEditingNextVisit] = useState(false);
 
   useEffect(() => {
+    // 1. 初動でローカルキャッシュ（一覧データ）から基本情報を探して即時表示する
+    const cachedStr = localStorage.getItem("cases_cache");
+    if (cachedStr) {
+        try {
+            const cachedList = JSON.parse(cachedStr);
+            const found = cachedList.find((c: any) => c.id === params.id);
+            if (found) {
+                setCaseData(found);
+                setEditData(found);
+                // 基本情報があれば、メインのローディングは解除してUIを表示させる
+                setLoading(false);
+            }
+        } catch (e) {
+            console.error("Cache parse error", e);
+        }
+    }
+    
+    // 2. 裏側で常に最新情報をフェッチする
     fetchData();
   }, [params.id]);
 
   const fetchData = async () => {
+    // キャッシュがない場合のみ、目立つローディングを出すためにフラグを制御する
+    // 基本的には setLoading(false) は useEffect 側で行われるか、ここでの処理後に完了する
     try {
       const res = await fetch(`/api/gas-new?action=getCase&caseId=${params.id}`);
       if (res.ok) {
@@ -136,7 +156,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
 
       const saveRes = await fetch("/api/gas-new", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveParts", payload: [newPart] })
+        body: JSON.stringify({ action: "saveParts", sheetName: "Parts", payload: [newPart] })
       });
       if (!saveRes.ok) throw new Error("部品の保存に失敗しました");
 
@@ -192,7 +212,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
       const res = await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveParts", payload: previewParts })
+        body: JSON.stringify({ action: "saveParts", sheetName: "Parts", payload: previewParts })
       });
       if (!res.ok) throw new Error("一括保存に失敗しました");
       
@@ -232,7 +252,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
       const res = await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveParts", payload: [editingPartData] })
+        body: JSON.stringify({ action: "saveParts", sheetName: "Parts", payload: [editingPartData] })
       });
       if (res.ok) {
         setParts(parts.map(p => p.id === editingPartId ? editingPartData : p));
@@ -282,7 +302,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
                     await fetch("/api/gas-new", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ action: "saveCase", payload: updated })
+                      body: JSON.stringify({ action: "saveCase", sheetName: "Cases", payload: updated })
                     });
                   } catch (e) {
                     alert("ステータスの更新に失敗しました。");

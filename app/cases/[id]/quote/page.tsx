@@ -56,6 +56,31 @@ export default function QuotePage({ params }: { params: { id: string } }) {
   const [quotePartsSnapshot, setQuotePartsSnapshot] = useState<any[]>([]);
 
   useEffect(() => {
+    // 1. 初動でキャッシュから基本情報を設定して即時表示を可能にする
+    const cachedStr = localStorage.getItem("cases_cache");
+    if (cachedStr) {
+      try {
+        const cachedList = JSON.parse(cachedStr);
+        const c = cachedList.find((item: any) => item.id === params.id);
+        if (c) {
+          setCaseData(c);
+          // 宛名・工事名などの初期値をキャッシュから設定
+          const finalRecipient = (c.clientName === "99999" ? c.visitName : c.clientName) || c.visitName || c.clientName || "";
+          setQuoteRecipientName(finalRecipient);
+          setQuoteSiteName(c.visitAddress || c.address || "");
+          setQuoteProjectName(c.targetProduct || "");
+          if (c.requestDetails) {
+            setQuoteProjectExt(c.requestDetails.split(/[。\n]/)[0].substring(0, 50));
+          }
+          // 基本情報があればローディングを解く
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error("Cache load error", e);
+      }
+    }
+    
+    // 2. 最新情報の読み込みを開始
     fetchData();
   }, [params.id]);
 
@@ -67,16 +92,39 @@ export default function QuotePage({ params }: { params: { id: string } }) {
         const c = data.case;
         setCaseData(c);
         
-        // 初期値の設定
-        setQuoteRecipientName(c.clientName || "");
-        setQuoteSiteName(c.visitAddress || "");
+        // 宛名のロジック修正：基本はクライアント名だが、99999の場合は訪問先名にする
+        const finalRecipient = (c.clientName === "99999" ? c.visitName : c.clientName) || c.visitName || c.clientName || "";
+        setQuoteRecipientName(finalRecipient);
+        
+        // 現場名のロジック修正：visitAddressを優先
+        setQuoteSiteName(c.visitAddress || c.address || "");
         setQuoteProjectName(c.targetProduct || "");
         
         if (c.requestDetails) {
           setQuoteProjectExt(c.requestDetails.split(/[。\n]/)[0].substring(0, 50));
         }
         
-        const fetchedParts = data.parts || [];
+        let fetchedParts = data.parts || [];
+
+        // 【部品データの取得強化】data.partsが空の場合、個別のアクションで再取得を試みる
+        if (fetchedParts.length === 0) {
+          try {
+            const partsRes = await fetch("/api/gas-new", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "getData", sheetName: "Parts" })
+            });
+            if (partsRes.ok) {
+              const allParts = await partsRes.json();
+              const pData = Array.isArray(allParts) ? allParts : (allParts.data || []);
+              // 現在のcaseIdに紐付く部品のみ抽出
+              fetchedParts = pData.filter((p: any) => (p.caseId || p.caseid) === params.id);
+            }
+          } catch (e) {
+            console.error("Fallback parts fetch failed", e);
+          }
+        }
+
         setParts(fetchedParts);
         
         if (quoteId && data.quotes) {
@@ -189,7 +237,10 @@ export default function QuotePage({ params }: { params: { id: string } }) {
   const partsTotalRaw = displayParts.reduce((sum, p) => sum + (Number(p.price) * Number(p.quantity)), 0);
   const partsDiscountAmount = Math.round(partsTotalRaw * (discountRate / 100));
   const partsTotalDiscounted = partsTotalRaw - partsDiscountAmount;
-  const liveTotalAmount = partsTotalDiscounted + travelFee + technicalFee + disposalFee;
+  
+  const subtotalWithoutTax = partsTotalDiscounted + travelFee + technicalFee + disposalFee;
+  const taxAmount = Math.round(subtotalWithoutTax * 0.1);
+  const liveTotalAmount = subtotalWithoutTax + taxAmount;
 
   // 重要: 表示・出力用の最終確定値（編集中でなければ保存済みデータ、編集中ならライブ計算値）
   const effectiveTotal = (!isEditing && storedTotal !== null) ? storedTotal : liveTotalAmount;
@@ -201,7 +252,7 @@ export default function QuotePage({ params }: { params: { id: string } }) {
       await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveParts", payload: parts })
+        body: JSON.stringify({ action: "saveParts", sheetName: "Parts", payload: parts })
       });
 
       const payload = {
@@ -226,15 +277,19 @@ export default function QuotePage({ params }: { params: { id: string } }) {
       const res = await fetch("/api/gas-new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "saveQuote", payload })
+        // 実績のある saveParts アクションを汎用的に利用する
+        body: JSON.stringify({ action: "saveParts", sheetName: "Quotes", payload: [payload] })
       });
 
-      if (!res.ok) throw new Error("見積保存に失敗しました");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.details || "見積保存に失敗しました。スプレッドシートの設定を確認してください。");
+      }
       setSaved(true);
       setIsEditing(false);
       alert("見積情報を保存しました。");
     } catch (error: any) {
-      alert(error.message);
+      alert(`エラー詳細: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -246,12 +301,17 @@ export default function QuotePage({ params }: { params: { id: string } }) {
     const sendMethodStr = mode === "FAX" ? `FAX送信 (${caseData?.clientFax || "---"})` : "メール送信";
     const partsDetailText = effectiveParts.map((p, i) => `${i + 1}. 品番: ${p.partCode}\n　品名: ${p.partName}\n　金額: ¥${Number(p.price).toLocaleString()}\n　数量: ${p.quantity}`).join("\n");
     
+    const taxAmountValue = Math.round(subtotalWithoutTax * 0.1);
+    
     // 内訳項目の構築
     let costBreakdown = `出張費: ¥${travelFee.toLocaleString()}\n`;
     costBreakdown += `技術料: ¥${technicalFee.toLocaleString()}\n`;
     if (disposalFee > 0) costBreakdown += `処分料: ¥${disposalFee.toLocaleString()}\n`;
     costBreakdown += `部品代: ¥${partsTotalRaw.toLocaleString()}\n`;
     if (discountRate > 0) costBreakdown += `値引き: -¥${Math.round(partsTotalRaw * (discountRate/100)).toLocaleString()} (${discountRate}%)\n`;
+    costBreakdown += `----------------\n`;
+    costBreakdown += `税抜小計: ¥${subtotalWithoutTax.toLocaleString()}\n`;
+    costBreakdown += `消費税(10%): ¥${taxAmountValue.toLocaleString()}\n`;
     
     const bodyText = `${recipient.name} さんお疲れ様です。\n\n${mode === "FAX" ? "見積り作成送付をFAXにてお願い致します。" : `見積り作成送付を、以下のメールアドレス宛てにPDFで送信をお願いします。\n【送信先】${customerEmail}`}\n\n受付No: ${caseData?.receiptNo || "未発行"}\n訪問先名: ${caseData?.clientName || "お客様"}\n見積り宛名: ${quoteRecipientName}\n担当: ${caseData?.clientContactName || "---"}\n現場名: ${quoteSiteName}\n工事名: ${quoteProjectName} ${quoteProjectExt}\n送付方法: ${sendMethodStr}\n\n【金額内訳】\n${costBreakdown}合計: ¥${effectiveTotal.toLocaleString()}（税込）\n\n【部品詳細】\n${partsDetailText}`.trim();
     window.location.href = `mailto:${recipient.email}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
@@ -405,14 +465,19 @@ export default function QuotePage({ params }: { params: { id: string } }) {
   const GrandTotal = (
     <div className="bg-white rounded-[44px] p-10 pt-12 pb-12 text-center shadow-[0_20px_50px_rgba(0,0,0,0.04)] border border-slate-100 relative overflow-hidden w-full group">
       <div className="absolute top-0 right-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-amber-500 opacity-80" />
-      <p className="text-[10px] font-black text-slate-400 mb-5 uppercase tracking-[0.4em] relative z-10">Quote Grand Total</p>
-      <div className="flex items-center justify-center gap-1.5 mb-2 relative z-10 transition-transform group-hover:scale-105 duration-500">
-        <span className="text-[26px] font-black text-orange-500 mt-[-16px]">¥</span>
-        <p className="text-[64px] font-black text-slate-900 leading-none tracking-tighter">
-          {effectiveTotal.toLocaleString()}
-        </p>
+      <div className="flex flex-col items-center justify-center gap-1 mb-2 relative z-10 transition-transform group-hover:scale-105 duration-500">
+        <div className="flex items-center gap-4 text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2">
+           <span>税抜: ¥{subtotalWithoutTax.toLocaleString()}</span>
+           <span>消費税: ¥{taxAmount.toLocaleString()}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[26px] font-black text-orange-500 mt-[-16px]">¥</span>
+          <p className="text-[64px] font-black text-slate-900 leading-none tracking-tighter">
+            {effectiveTotal.toLocaleString()}
+          </p>
+        </div>
       </div>
-      <p className="text-[9px] font-black text-slate-300 mt-4 uppercase tracking-widest">(税込 / Tax Included)</p>
+      <p className="text-[9px] font-black text-slate-300 mt-3 uppercase tracking-widest">(税込 / 10% Tax Included)</p>
       <button onClick={handleSaveQuote} disabled={saving || saved} className={`mt-10 w-full py-5.5 rounded-[26px] font-black text-sm flex justify-center items-center gap-3.5 transition-all shadow-xl ${saved ? 'bg-emerald-50 text-emerald-500 border border-emerald-100' : 'bg-[#eaaa43] text-white hover:brightness-110 active:scale-95'}`}>
           {saving ? <Loader2 size={24} className="animate-spin" /> : (saved ? <CheckCircle size={24} /> : <Save size={24} />)}
           {saved ? "SAVED" : "見積保存 (スプレッドシート)"}

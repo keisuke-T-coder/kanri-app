@@ -11,11 +11,20 @@ export async function GET(req: Request) {
       throw new Error("NEXT_PUBLIC_NEW_GAS_URL is not configured.");
     }
     
-    let url = `${gasUrl}?action=${action}`;
-    if (caseId) url += `&id=${caseId}&caseId=${caseId}`;
+    const params = new URLSearchParams();
+    searchParams.forEach((value, key) => {
+      params.append(key, value);
+    });
+    // id/caseIdの互換性のための処理
+    if (caseId && !params.has("id")) params.append("id", caseId);
+
+    const url = `${gasUrl}?${params.toString()}`;
 
     const res = await fetch(url, { cache: "no-store", headers: { 'Content-Type': 'application/json' }});
-    if (!res.ok) throw new Error("Failed to fetch from GAS");
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || errorData.details || "GAS request failed");
+    }
     const data = await res.json();
     return NextResponse.json(data);
   } catch (error: any) {
@@ -31,12 +40,23 @@ export async function POST(req: Request) {
     }
     
     const body = await req.json();
-    const res = await fetch(gasUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+    const response = await fetch(gasUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
     });
-    const data = await res.json();
+
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      return NextResponse.json({ error: "GAS returned non-JSON response", details: "GAS側の処理でエラーが発生しました。" }, { status: response.status });
+    }
+
+    if (!response.ok) {
+      return NextResponse.json(data || { error: "GAS Request failed" }, { status: response.status });
+    }
     return NextResponse.json(data);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
