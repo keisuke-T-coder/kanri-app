@@ -273,6 +273,18 @@ function SubmitReportContent() {
                   
                   {/* バッジエリア */}
                   <div className="flex items-center flex-wrap gap-1 mt-[2px] overflow-hidden">
+                    {r.提案有無 === '有' && (
+                      <div className="flex items-center max-w-full overflow-hidden mr-1">
+                        <span className="text-[7.5px] text-[#eaaa43] font-bold border border-[#eaaa43] bg-orange-50 px-1.5 py-[1px] rounded-[2px] leading-none shadow-sm shrink-0">
+                          提案
+                        </span>
+                        {r.提案内容 && (
+                          <span className="text-[7.5px] text-orange-600 font-bold ml-1 truncate">
+                            {r.提案内容}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {isSeiyaku && (
                       <div className="flex items-center max-w-full overflow-hidden mr-1">
                         <span className="text-[7.5px] text-white font-bold bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 px-1.5 py-[1.5px] rounded-[2px] leading-none shadow-sm shrink-0">

@@ -293,67 +293,70 @@ function ReportList() {
           </div>
         ) : (
           data.map((item, index) => {
-            const isContracted = item.メモ && item.メモ.includes('成約');
-            const isHighway = item.遠隔高速利用 === '有';
-            const isExpanded = expandedIndex === index;
+                    const isProposal = item.提案有無 === '有';
+                    const isContracted = item.メモ && item.メモ.includes('成約');
+                    const isHighway = item.遠隔高速利用 === '有';
+                    const isExpanded = expandedIndex === index;
 
-            return (
-              <div 
-                key={index} 
-                onClick={() => setExpandedIndex(isExpanded ? null : index)}
-                className={`rounded-[14px] shadow-sm relative cursor-pointer transition-all duration-300 ${isContracted ? 'p-[3px] bg-gradient-to-r from-red-400 via-yellow-400 via-green-400 via-blue-400 to-purple-400' : 'p-0 bg-transparent'}`}
-              >
-                <div className={`rounded-[11px] p-3.5 w-full relative overflow-hidden flex flex-col gap-1.5 ${isHighway ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100'} ${isContracted && !isHighway ? 'border-none' : 'border'}`}>
-                  
-                  {isHighway && (
-                    <div className="absolute right-[-10px] top-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center transform -rotate-12 opacity-40 text-blue-400">
-                      <svg width="110" height="110" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.08 3.11H5.77L6.85 7zM7.5 16c-.83 0-1.5-.67-1.5-1.5S6.67 13 7.5 13s1.5.67 1.5 1.5S8.33 16 7.5 16zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-                      </svg>
-                    </div>
-                  )}
+                    return (
+                      <div 
+                        key={index} 
+                        onClick={() => setExpandedIndex(isExpanded ? null : index)}
+                        className={`rounded-[14px] shadow-sm relative cursor-pointer transition-all duration-300 ${isContracted ? 'p-[3px] bg-gradient-to-r from-red-400 via-yellow-400 via-green-400 via-blue-400 to-purple-400' : 'p-0 bg-transparent'}`}
+                      >
+                        <div className={`rounded-[11px] p-3.5 w-full relative overflow-hidden flex flex-col gap-1.5 ${isHighway ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100'} ${isContracted && !isHighway ? 'border-none' : 'border'}`}>
+                          
+                          {isHighway && (
+                            <div className="absolute right-[-10px] top-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center transform -rotate-12 opacity-40 text-blue-400">
+                              <svg width="110" height="110" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.08 3.11H5.77L6.85 7zM7.5 16c-.83 0-1.5-.67-1.5-1.5S6.67 13 7.5 13s1.5.67 1.5 1.5S8.33 16 7.5 16zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                              </svg>
+                            </div>
+                          )}
 
-                  <div className="flex justify-between items-center relative z-10">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${isHighway ? 'bg-white/60 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
-                        {formatTimeForDisplay(item.開始時間)} - {formatTimeForDisplay(item.終了時間)}
-                      </span>
-                    </div>
-                    <div className="text-gray-400">
-                      {isExpanded ? (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 15l7-7 7 7"></path></svg>
-                      ) : (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
-                      )}
-                    </div>
-                  </div>
+                          <div className="flex justify-between items-center relative z-10">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${isHighway ? 'bg-white/60 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                                {formatTimeForDisplay(item.開始時間)} - {formatTimeForDisplay(item.終了時間)}
+                              </span>
+                            </div>
+                            <div className="text-gray-400">
+                              {isExpanded ? (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 15l7-7 7 7"></path></svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
+                              )}
+                            </div>
+                          </div>
 
-                  <div className="relative z-10">
-                    <div className="text-[13px] font-black text-gray-800 truncate flex items-center gap-1.5">
-                      {item.クライアント && item.クライアント !== '(-----)' && item.クライアント !== '-' && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                          ["リビング", "ハウス"].includes(item.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
-                          ["トータルサービス", "タカギ"].includes(item.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
-                          ["崎山不動産", "ひだまり"].includes(item.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
-                          item.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
-                          "bg-gray-100 text-gray-500 border-gray-200"
-                        }`}>
-                          {item.クライアント}
-                        </span>
-                      )}
-                      {item.訪問先}
-                      {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.担当者}</span>}
-                    </div>
-                    <div className={`text-[10px] truncate font-bold mt-0.5 ${isHighway ? 'text-blue-600/80' : 'text-gray-400'}`}>
-                      {item.エリア} / {item.品目} / {item.作業内容}
-                    </div>
-                  </div>
+                          <div className="relative z-10">
+                            <div className="text-[13px] font-black text-gray-800 truncate flex items-center gap-1.5">
+                              {item.クライアント && item.クライアント !== '(-----)' && item.クライアント !== '-' && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                  ["リビング", "ハウス"].includes(item.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
+                                  ["トータルサービス", "タカギ"].includes(item.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                  ["崎山不動産", "ひだまり"].includes(item.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
+                                  item.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                                  "bg-gray-100 text-gray-500 border-gray-200"
+                                }`}>
+                                  {item.クライアント}
+                                </span>
+                              )}
+                              {item.訪問先}
+                              {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.担当者}</span>}
+                            </div>
+                            <div className={`text-[10px] truncate font-bold mt-0.5 ${isHighway ? 'text-blue-600/80' : 'text-gray-400'}`}>
+                              {item.エリア} / {item.品目} / {item.作業内容}
+                            </div>
+                          </div>
 
-                  <div className="flex justify-between items-end mt-1 relative z-10">
-                    <div className="flex gap-1.5 flex-wrap">
-                      {isContracted && <span className="bg-gradient-to-r from-red-500 to-purple-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm">成約</span>}
-                      {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">遠隔・高速利用: {item.伝票番号}</span>}
-                    </div>
+                          <div className="flex justify-between items-end mt-1 relative z-10">
+                            <div className="flex gap-1.5 flex-wrap">
+                              {isContracted && <span className="bg-gradient-to-r from-red-500 to-purple-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm">成約</span>}
+                              {isProposal && <span className="bg-[#eaaa43] text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-[#d4932d]">提案あり</span>}
+                              {isProposal && item.提案内容 && <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-orange-200">提案品: {item.提案内容}</span>}
+                              {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">遠隔・高速利用: {item.伝票番号}</span>}
+                            </div>
                     <div className="flex gap-2.5 text-[11px] font-black">
                       <span className="text-gray-600">技:¥{Number(item.技術料).toLocaleString()}</span>
                       {item.作業区分 === '修理' && <span className={isHighway ? 'text-blue-700' : 'text-[#547b97]'}>修:¥{Number(item.修理金額).toLocaleString()}</span>}
