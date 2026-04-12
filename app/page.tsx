@@ -28,57 +28,24 @@ export default function Home() {
         <h1 className="text-white font-bold tracking-widest text-lg">MENU / メニュー</h1>
       </div>
 
-      {/* 5つのメニューカード */}
-      <div className="grid grid-cols-2 gap-4 w-[92%] max-w-md">
+      {/* 2つのメニューカード */}
+      <div className="grid grid-cols-1 gap-4 w-[92%] max-w-md">
 
         {/* 1. 日報入力 */}
-        <Link href="/report" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform">
-          <h2 className="text-[1.1rem] font-black text-gray-900 tracking-widest mb-1">日報入力</h2>
-          <p className="text-[10px] text-gray-400 font-medium mb-2">Daily Report</p>
-          <div className="w-[50%] h-[2px] bg-[#cba358]"></div>
+        <Link href="/report" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform border border-transparent hover:border-orange-100">
+          <h2 className="text-[1.3rem] font-black text-gray-900 tracking-widest mb-1">日報入力</h2>
+          <p className="text-[10px] text-gray-400 font-medium mb-3">Daily Report</p>
+          <div className="w-[40%] h-[3px] bg-[#eaaa43] rounded-full"></div>
         </Link>
 
-        {/* 2. 案件管理 (Coming Soon) */}
-        <div onClick={handleComingSoon} className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform cursor-pointer">
-          <h2 className="text-[1.1rem] font-black text-gray-400 tracking-widest mb-1">案件管理</h2>
-          <p className="text-[10px] text-gray-300 font-medium mb-2 opacity-50">Management</p>
-          <div className="w-[50%] h-[2px] bg-gray-200"></div>
-        </div>
-
-        {/* 3. ホワイトボード */}
-        <Link href="/whiteboard" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform">
-          <h2 className="text-[1.1rem] font-black text-gray-900 tracking-widest mb-1">ホワイトボード</h2>
-          <p className="text-[10px] text-gray-400 font-medium mb-2">Whiteboard</p>
-          <div className="w-[50%] h-[2px] bg-[#cba358]"></div>
+        {/* 2. ホワイトボード */}
+        <Link href="/whiteboard" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-10 flex flex-col items-center justify-center active:scale-95 transition-transform border border-transparent hover:border-orange-100">
+          <h2 className="text-[1.3rem] font-black text-gray-900 tracking-widest mb-1">ホワイトボード</h2>
+          <p className="text-[10px] text-gray-400 font-medium mb-3">Whiteboard</p>
+          <div className="w-[40%] h-[3px] bg-[#eaaa43] rounded-full"></div>
         </Link>
 
-        {/* 4. 部品管理 */}
-        <Link href="/parts" className="bg-white rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.03)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform">
-          <h2 className="text-[1.1rem] font-black text-gray-900 tracking-widest mb-1">部品管理</h2>
-          <p className="text-[10px] text-gray-400 font-medium mb-2">Parts List</p>
-          <div className="w-[50%] h-[2px] bg-[#cba358]"></div>
-        </Link>
       </div>
-
-      {/* 5. LTS依頼 (Main Application Entry) */}
-      {selectedWorker === "德重" && (
-        <div 
-          onClick={(e) => {
-            e.preventDefault();
-            const pass = prompt("LTS専用エリアへのログインパスワードを入力してください");
-            if (pass === "syuke") {
-              router.push("/cases");
-            } else if (pass !== null) {
-              alert("パスワードが正しくありません。");
-            }
-          }} 
-          className="w-[92%] max-w-md mt-4 bg-white rounded-[20px] shadow-[0_4px_15px_rgba(0,0,0,0.05)] py-8 flex flex-col items-center justify-center active:scale-95 transition-transform cursor-pointer border border-[#eaaa43]/30"
-        >
-          <h2 className="text-[1.3rem] font-black text-gray-900 tracking-[0.1em] mb-1">LTS 依頼</h2>
-          <p className="text-[10px] text-[#eaaa43] font-bold uppercase tracking-widest">Lts Repair Requests</p>
-          <div className="w-[30%] h-[3px] bg-[#eaaa43] mt-3 rounded-full"></div>
-        </div>
-      )}
 
       {/* バージョン表記 (右下) */}
       <span className="fixed bottom-4 right-4 text-[10px] text-gray-400 italic">app version 1.1</span>

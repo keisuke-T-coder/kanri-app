@@ -2,15 +2,15 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 // --- GAS連携情報と選択肢 ---
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
-const areas = ["市内南部エリア", "市街地エリア", "市内北部エリア", "日置エリア", "北薩エリア", "南薩エリア", "大隅エリア", "鹿屋エリア", "姶良エリア", "霧島エリア", "その他"];
+const GAS_URL = '/api/gas';
 const requestContents = ["水漏れ", "作動不良", "開閉不良", "破損", "異音", "詰り関係", "その他"];
 const workContents = ["部品交換", "製品交換、取付", "清掃", "点検", "見積", "応急処置", "その他"];
 
 // --- スタッフ設定 ---
-const assignees = ["南", "新田", "德重", "田中", "佐藤"];
+const assignees = ["田中", "南", "新田", "德重", "佐藤"];
 const staffStyles: Record<string, { border: string, bg: string, text: string, dot: string, headerBg: string }> = {
   "南": { border: "border-orange-400", bg: "bg-orange-50", text: "text-orange-600", dot: "bg-orange-400", headerBg: "bg-orange-100 text-orange-800" },
   "新田": { border: "border-green-400", bg: "bg-green-50", text: "text-green-600", dot: "bg-green-400", headerBg: "bg-green-100 text-green-800" },
@@ -20,6 +20,7 @@ const staffStyles: Record<string, { border: string, bg: string, text: string, do
 };
 
 const wbItems = ["DW", "AW", "EW", "KS", "PH", "1D", "1A", "2A", "RS", "MT", "ハウス", "リビング", "ひだまり", "JIO", "LTS", "トータルサービス", "その他"];
+const areas = ["市街地エリア", "市内北部エリア", "市内南部エリア", "北薩エリア", "南薩エリア", "鹿屋エリア", "霧島エリア", "トータルサービス", "その他"];
 const absenceTypes = ["1日休み", "午前休", "午後休"];
 
 // --- タイムライン設定 ---
@@ -38,13 +39,15 @@ function formatDateDisplay(date: Date) {
 
 const parseMins = (t: string) => {
   if(!t) return 0;
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
+  const parts = t.split(':').map(Number);
+  if (parts.length < 2) return 0;
+  const [h, m] = parts;
+  return h * 60 + (m || 0);
 };
 
 // --- ヘルパー関数 ---
-const processOverlaps = (staffSchedules: any[], dynamicHourHeight: number, dynamicMinBlock: number) => {
-  const parsed = staffSchedules.map(s => ({ ...s, startMins: parseMins(s.開始時間), endMins: parseMins(s.終了時間) }))
+const processOverlaps = (staffSchedules: any[]) => {
+  const parsed = staffSchedules.map(s => ({ ...s, startMins: parseMins(s.start_time), endMins: parseMins(s.end_time) }))
                                .sort((a, b) => a.startMins - b.startMins);
   const columns: any[][] = [];
   parsed.forEach(s => {
@@ -83,14 +86,14 @@ const NoticeBanner = ({ targetDateStr, notices, currentUser, deleteNotice, toggl
              <button onClick={() => deleteNotice(n.id)} className="absolute top-1 right-2 text-gray-400 hover:text-red-500 text-xs p-1">🗑️</button>
              <div className="font-bold text-[11px] text-gray-800 pr-6">⚠️ {n.text} <span className="text-[9px] text-gray-400">({n.author})</span></div>
              <div className="flex justify-between items-center mt-1">
-               <div className="text-[9px] text-gray-500 font-bold flex flex-wrap gap-1">
-                  {n.confirmedBy.length > 0 ? `確認済: ${n.confirmedBy.join(', ')}` : '未確認'}
-               </div>
-               {currentUser && (
-                 <button onClick={() => toggleNoticeConfirm(n.id)} className={`px-2 py-1 rounded text-[9px] font-black transition-colors ${isConfirmed ? 'bg-gray-200 text-gray-600' : 'bg-green-500 text-white shadow-sm active:scale-95 transition-transform'}`}>
-                    {isConfirmed ? '確認済 取消' : '✅ 確認する'}
-                 </button>
-               )}
+                <div className="text-[9px] text-gray-500 font-bold flex flex-wrap gap-1">
+                   {n.confirmedBy.length > 0 ? `確認済: ${n.confirmedBy.join(', ')}` : '未確認'}
+                </div>
+                {currentUser && (
+                  <button onClick={() => toggleNoticeConfirm(n.id)} className={`px-2 py-1 rounded text-[9px] font-black transition-colors ${isConfirmed ? 'bg-gray-200 text-gray-600' : 'bg-green-500 text-white shadow-sm active:scale-95 transition-transform'}`}>
+                     {isConfirmed ? '確認済 取消' : '✅ 確認する'}
+                  </button>
+                )}
              </div>
           </div>
         );
@@ -105,15 +108,13 @@ const NoticeBanner = ({ targetDateStr, notices, currentUser, deleteNotice, toggl
 // --- サブコンポーネント: タイムライン本体 ---
 const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, handleCanvasClick, fetchData, isZoomed, dynamicHourHeight, dynamicMinBlock }: any) => {
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
-  const daySchedules = schedules.filter((s: any) => s.日付 === targetDateStr);
+  const daySchedules = schedules.filter((s: any) => s.date === targetDateStr);
   
-  // 長押しタイマー用のRef
   const longPressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  // ドラッグ操作用のローカル状態
   const [isDragging, setIsDragging] = useState(false);
   const [isActuallyDragging, setIsActuallyDragging] = useState(false);
-  const [isPressing, setIsPressing] = useState(false); // 長押し待機中
+  const [isPressing, setIsPressing] = useState(false); 
   const [dragStartY, setDragStartY] = useState(0);
   const [draggedSchedule, setDraggedSchedule] = useState<any>(null);
   const [dragOffsetY, setDragOffsetY] = useState(0);
@@ -127,7 +128,6 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const offsetY = clientY - rect.top;
     
-    // 他のタイマーをクリア
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 
     setIsDragging(false);
@@ -137,15 +137,13 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
     setDraggedSchedule(schedule);
     setDragOffsetY(offsetY);
     setDragCurrentTop(rect.top - (e.currentTarget.parentElement?.getBoundingClientRect().top || 0));
-    setDragStartTime(schedule.開始時間);
-    setDragEndTime(schedule.終了時間);
+    setDragStartTime(schedule.start_time);
+    setDragEndTime(schedule.end_time);
 
-    // 1秒間の長押しタイマーを開始
     longPressTimerRef.current = setTimeout(() => {
       setIsDragging(true);
       setIsActuallyDragging(true);
       setIsPressing(false);
-      // 長押し完了時に軽くバイブレーション（対応機種のみ）
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
     }, 1000);
   };
@@ -153,9 +151,7 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
   const handleMouseMove = (e: MouseEvent | TouchEvent) => {
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
     
-    // まだドラッグ開始していない（長押し待機中）の場合
     if (!isDragging && isPressing) {
-      // 10px以上動いたら「長押し」をキャンセル（ユーザーが誤って動かしたと判断）
       if (Math.abs(clientY - dragStartY) > 10) {
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
@@ -182,7 +178,7 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
     const startHour = Math.floor(totalMinutes / 60) + START_HOUR;
     const startMin = Math.round((totalMinutes % 60) / 30) * 30;
     
-    const durationMins = parseMins(draggedSchedule.終了時間) - parseMins(draggedSchedule.開始時間);
+    const durationMins = parseMins(draggedSchedule.end_time) - parseMins(draggedSchedule.start_time);
     const endTotalMins = (startHour - START_HOUR) * 60 + startMin + durationMins;
     const endHour = Math.floor(endTotalMins / 60) + START_HOUR;
     const endMin = endTotalMins % 60;
@@ -193,11 +189,9 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
     setDragEndTime(newEnd);
   };
 
-  // ドラッグ終了直後の誤クリック防止用Ref
   const dragFinishedRef = React.useRef(false);
 
   const handleMouseUp = async (e: MouseEvent | TouchEvent) => {
-    // タイマーをクリア
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -208,18 +202,20 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
 
     if (!isDragging && !isPressing && !draggedSchedule) return;
     
-    const hasChanged = isDragging && isActuallyDragging && (dragStartTime !== draggedSchedule.開始時間 || dragEndTime !== draggedSchedule.終了時間);
+    const hasChanged = isDragging && isActuallyDragging && (dragStartTime !== draggedSchedule.start_time || dragEndTime !== draggedSchedule.end_time);
     
     if (hasChanged) {
-      const updatedSchedule = { ...draggedSchedule, 開始時間: dragStartTime, 終了時間: dragEndTime };
-      setSchedules((prev: any[]) => prev.map(s => s.タイムスタンプ === draggedSchedule.タイムスタンプ ? updatedSchedule : s));
+      const updatedSchedule = { ...draggedSchedule, start_time: dragStartTime, end_time: dragEndTime };
+      setSchedules((prev: any[]) => prev.map(s => s.id === draggedSchedule.id ? updatedSchedule : s));
       
-      // 非同期でサーバーに保存
       const saveToGAS = async (payload: any) => {
         try {
-          const formBody = new URLSearchParams();
-          formBody.append('data', JSON.stringify({ ...payload, action: 'update' }));
-          await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
+          const res = await fetch(GAS_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ ...payload, action: 'update' }) 
+          });
+          if (!res.ok) throw new Error("保存エラー");
         } catch (error) {
           console.error("サーバー保存エラー", error);
           alert("通信エラーが発生しました。最新の状態を読み込みます。");
@@ -228,17 +224,14 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
       };
       saveToGAS(updatedSchedule);
 
-      // ドラッグ終了フラグを立てて、直後のクリックイベントを無視するようにする
       dragFinishedRef.current = true;
       setTimeout(() => dragFinishedRef.current = false, 100);
     }
 
-    // ドラッグでも長押し完了でもなかった場合（＝単なるクリック）
     if (!wasDraggingBefore && wasPressingBefore && draggedSchedule) {
       openDetail(draggedSchedule, e as any);
     }
 
-    // ★ サーバーのレスポンスを待たずに即座にドラッグ状態を解除する
     setIsDragging(false);
     setIsActuallyDragging(false);
     setIsPressing(false);
@@ -273,18 +266,14 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
       
       <div className="relative z-10 flex w-full pl-[36px] h-full cursor-pointer">
         {assignees.map(staff => {
-          const staffSchedules = processOverlaps(daySchedules.filter((s: any) => s.担当者 === staff), dynamicHourHeight, dynamicMinBlock);
+          const staffSchedules = processOverlaps(daySchedules.filter((s: any) => s.assignee === staff));
           const style = staffStyles[staff];
           return (
             <div key={staff} 
                  className="flex-1 border-r border-gray-50 relative min-w-[50px] hover:bg-gray-50/50 transition-colors"
                  onClick={(e) => {
-                   // ドラッグ中や、終了直後のクリックは無視する
                    if (isDragging || isActuallyDragging || isPressing || dragFinishedRef.current) return;
-                   
-                   // 重要: スケジュールブロック本体やその中の要素を触った場合は、背景のクリックイベント（新規作成）を無視する
                    if (e.target !== e.currentTarget) return;
-
                    handleCanvasClick(e, staff, targetDateStr);
                  }}> 
               
@@ -295,22 +284,21 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
                 let heightPx = ((endMins - startMins) / 60) * dynamicHourHeight;
                 heightPx = Math.max(heightPx, dynamicMinBlock); 
 
-                // 長押し中の視覚フィードバック
-                const isCurrentPressing = isPressing && draggedSchedule?.タイムスタンプ === schedule.タイムスタンプ;
+                const isCurrentPressing = isPressing && draggedSchedule?.id === schedule.id;
 
                 if (schedule.isAbsence) {
                   return (
-                    <div key={schedule.タイムスタンプ || idx} onClick={(e) => openDetail(schedule, e)} className="absolute bg-red-500 rounded-[4px] shadow-sm cursor-pointer active:scale-95 transition-transform flex flex-col justify-center items-center overflow-hidden border border-red-600 z-20" 
+                    <div key={schedule.id || idx} onClick={(e) => openDetail(schedule, e)} className="absolute bg-red-500 rounded-[4px] shadow-sm cursor-pointer active:scale-95 transition-transform flex flex-col justify-center items-center overflow-hidden border border-red-600 z-20" 
                          style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
                       <span className={`text-white font-black writing-vertical-rl ${isZoomed ? 'text-[8px]' : 'text-[10px]'}`}>{schedule.absenceType}</span>
                     </div>
                   );
                 }
                 return (
-                  <div key={schedule.タイムスタンプ || idx} 
+                  <div key={schedule.id || idx} 
                        onMouseDown={(e) => handleMouseDown(e, schedule)}
                        onTouchStart={(e) => handleMouseDown(e, schedule)}
-                       className={`absolute bg-white rounded-[6px] shadow-md border ${style.border} border-l-[4px] cursor-pointer transition-all flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-20 leading-tight ${(isDragging || isActuallyDragging) && draggedSchedule?.タイムスタンプ === schedule.タイムスタンプ ? 'opacity-0 scale-95' : ''} ${isCurrentPressing ? 'ring-4 ring-orange-400 ring-opacity-50 animate-pulse bg-orange-50' : ''}`} 
+                       className={`absolute bg-white rounded-[6px] shadow-md border ${style.border} border-l-[4px] cursor-pointer transition-all flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-20 leading-tight ${(isDragging || isActuallyDragging) && draggedSchedule?.id === schedule.id ? 'opacity-0 scale-95' : ''} ${isCurrentPressing ? 'ring-4 ring-orange-400 ring-opacity-50 animate-pulse bg-orange-50' : ''}`} 
                        style={{ top: `${Math.max(0, topPx)}px`, height: `${heightPx}px`, left: `${schedule.computedLeft}%`, width: `${schedule.computedWidth}%` }}>
                     
                     {isZoomed ? (
@@ -321,7 +309,7 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
                     ) : (
                       <>
                         <div className="flex justify-between items-start gap-1">
-                          <span className={`font-black text-[9px] ${style.text}`}>{schedule.開始時間}</span>
+                          <span className={`font-black text-[9px] ${style.text}`}>{schedule.start_time}</span>
                           <span className="bg-gray-100 text-gray-600 text-[8px] font-bold px-1 rounded truncate min-w-0">{schedule.wbItem === 'その他' ? schedule.wbItemDetail : schedule.wbItem}</span>
                         </div>
                         <div className="font-bold text-[9px] text-gray-800 mt-0.5 line-clamp-2">{schedule.locationDetail}</div>
@@ -331,11 +319,11 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
                 );
               })}
 
-              {isDragging && draggedSchedule && schedules.find((s: any) => s.タイムスタンプ === draggedSchedule.タイムスタンプ)?.日付 === targetDateStr && (
+              {isDragging && draggedSchedule && schedules.find((s: any) => s.id === draggedSchedule.id)?.date === targetDateStr && (
                 <div className={`absolute bg-[#eaaa43]/80 rounded-[6px] shadow-2xl border-2 border-white border-l-[4px] border-l-[#eaaa43] flex flex-col overflow-hidden ${isZoomed ? 'p-0.5' : 'p-1'} z-50 pointer-events-none transition-none transform scale-105`}
                      style={{ 
                        top: `${dragCurrentTop}px`, 
-                       height: `${((parseMins(draggedSchedule.終了時間) - parseMins(draggedSchedule.開始時間)) / 60) * dynamicHourHeight}px`, 
+                       height: `${((parseMins(draggedSchedule.end_time) - parseMins(draggedSchedule.start_time)) / 60) * dynamicHourHeight}px`, 
                        left: `${draggedSchedule.computedLeft}%`, 
                        width: `${draggedSchedule.computedWidth}%` 
                      }}>
@@ -355,6 +343,7 @@ const TimelineCanvas = ({ targetDateStr, schedules, setSchedules, openDetail, ha
 };
 
 function WhiteboardContent() {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
@@ -374,14 +363,13 @@ function WhiteboardContent() {
   const [isZoomed, setIsZoomed] = useState(false);
 
   const [formData, setFormData] = useState({
-    タイムスタンプ: '', 日付: getTodayString(), 開始時間: '', 終了時間: '', 担当者: '', 訪問先: '', エリア: '', クライアント: '', 品目: '', 品番: '', 依頼内容: '', 作業内容: '', 作業区分: '修理', 技術料: '0', 修理金額: '0', 販売金額: '0', 提案有無: '無', 提案内容: '', 遠隔高速利用: '無', 伝票番号: '', 状況: '未完了(予定)', メモ: '', 成約有無: '無', locationDetail: '', wbItem: '', wbItemDetail: '', absenceType: '1日休み'
+    id: '', date: getTodayString(), start_time: '', end_time: '', assignee: '', destination: '', area: '', client: '', item: '', part_number: '', request_content: '', work_content: '', work_type: '修理', tech_fee: '0', repair_amount: '0', sales_amount: '0', proposal_exists: '無', proposal_content: '', remote_highway_fee: '無', slip_number: '', status: '未完了(予定)', memo: '', locationDetail: '', wbItem: '', wbItemDetail: '', absenceType: '1日休み', report_data_id: ''
   });
 
   const [newNoticeText, setNewNoticeText] = useState("");
   const [isNoticeFormOpen, setIsNoticeFormOpen] = useState(false);
   const [noticeTargetDate, setNoticeTargetDate] = useState("");
 
-  // ★ ズーム状態に応じて高さを動的に変更（縮小時は32px）
   const dynamicHourHeight = isZoomed ? 32 : 50; 
   const dynamicMinBlock = isZoomed ? 26 : 44; 
 
@@ -401,21 +389,31 @@ function WhiteboardContent() {
       ]);
       
       const data = await schedulesRes.json();
-      let noticesData = [];
-      try { noticesData = await noticesRes.json(); } catch(e) { console.error("お知らせパースエラー", e); }
+      if (data && data.success === false) {
+        throw new Error(data.error || "予定データの取得に失敗しました");
+      }
 
-      const parsedSchedules = data.map((row: any) => {
-        let locDetail = row.場所の詳細 || row.訪問先 || "(場所未入力)"; 
-        let wItem = (row.品目 === '-' || row.品目 === '(-----)') ? "未定" : (row.品目 || "未定"); 
+      let noticesData = [];
+      try { 
+        noticesData = await noticesRes.json();
+      } catch(e) { console.error("お知らせパースエラー", e); }
+
+      // データ解析の強化: 日報データ（タグなし）でも表示できるように調整
+      const parsedSchedules = (Array.isArray(data) ? data : []).map((row: any) => {
+        // キーワードがない場合、エリアと訪問先を場所として採用
+        let locDetail = row.area && row.destination ? `${row.area} / ${row.destination}` : (row.area || row.destination || "(未入力)"); 
+        let wItem = (row.item === '-' || row.item === '(-----)' || !row.item) ? "未定" : (row.item || "未定"); 
         let wItemDet = "";
         let isAbsence = false;
         let absType = "";
-        const memo = row.メモ || "";
+        const memo = row.memo || "";
         
         const absenceMatch = memo.match(/【WB休み】種類:(.*?)(?:\n|$)/);
-        if (absenceMatch) {
+        // 判定強化: 作業区分がお休み、または訪問先/エリアに「休み」が含まれる場合も対象にする
+        if (absenceMatch || row.work_type === 'お休み' || (row.destination && row.destination.includes('休み')) || (row.area && row.area.includes('休み'))) {
           isAbsence = true;
-          absType = absenceMatch[1].trim();
+          absType = absenceMatch ? absenceMatch[1].trim() : (row.destination || "お休み");
+          locDetail = absType;
         }
 
         const match = memo.match(/【WB予定】場所:(.*?) \/ 品目:(.*?)(?:\n|$)/);
@@ -426,21 +424,43 @@ function WhiteboardContent() {
           else { wItem = "その他"; wItemDet = parsedItem; }
         }
 
-        let startTimeStr = row.開始時間 || "";
-        let endTimeStr = row.終了時間 || "";
-        if(startTimeStr.length > 5 && startTimeStr.includes('T')) {
-           const d = new Date(startTimeStr);
-           startTimeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        }
-        if(endTimeStr.length > 5 && endTimeStr.includes('T')) {
-           const d = new Date(endTimeStr);
-           endTimeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        }
+        const formatTime = (t: string) => {
+          if (!t) return "";
+          const s = String(t);
+          if (s.includes(' ')) {
+            const timePart = s.split(' ')[1];
+            return timePart.substring(0, 5);
+          }
+          if (s.includes('T')) {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+              return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            }
+          }
+          return s.substring(0, 5);
+        };
+
+        // 日付の正規化 (ローカル時刻を尊重して YYYY-MM-DD 形式に揃える)
+        const normalizeDateStr = (dStr: any) => {
+          if (!dStr) return "";
+          const d = new Date(dStr);
+          if (isNaN(d.getTime())) return String(dStr);
+          // タイムゾーンのずれ（UTC解析による1日戻り）を防ぐため、ローカルの日付を取得
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+
+        const normalizedDate = normalizeDateStr(row.date);
 
         return {
           ...row,
-          タイムスタンプ: row.タイムスタンプ || "",
-          日付: row.日付 || "", 担当者: row.担当者 || "", 開始時間: startTimeStr, 終了時間: endTimeStr, 訪問先: row.訪問先 || "", 依頼内容: row.依頼内容 || "", 作業内容: row.作業内容 || "", メモ: row.メモ || "", locationDetail: locDetail, wbItem: wItem, wbItemDetail: wItemDet, isAbsence, absenceType: absType
+          date: normalizedDate,
+          start_time: formatTime(row.start_time),
+          end_time: formatTime(row.end_time),
+          locationDetail: locDetail, 
+          wbItem: wItem, 
+          wbItemDetail: wItemDet, 
+          isAbsence, 
+          absenceType: absType
         };
       });
       setSchedules(parsedSchedules);
@@ -465,9 +485,11 @@ function WhiteboardContent() {
         confirmedBy: Array.isArray(n.confirmedBy) ? n.confirmedBy.join(',') : n.confirmedBy
       }));
       const payload = { action: 'updateNotices', notices: payloadNotices };
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-      await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
+      await fetch(GAS_URL, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(payload) 
+      });
     } catch (e) {
       console.error("お知らせ保存エラー", e);
     }
@@ -508,9 +530,9 @@ function WhiteboardContent() {
     const start = e.target.value;
     if (start) {
       const [hours, minutes] = start.split(':').map(Number);
-      const end = `${String((hours + 1) % 24).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-      setFormData({ ...formData, 開始時間: start, 終了時間: end });
-    } else setFormData({ ...formData, 開始時間: start });
+      const end = `${String((hours + 1) % 24).padStart(2, '0')}:${String(minutes || 0).padStart(2, '0')}`;
+      setFormData({ ...formData, start_time: start, end_time: end });
+    } else setFormData({ ...formData, start_time: start });
   };
 
   const handleAbsenceModeSwitch = (mode: boolean) => {
@@ -520,7 +542,7 @@ function WhiteboardContent() {
       let start = "08:00"; let end = "17:00";
       if (type === "午前休") { end = "12:00"; }
       else if (type === "午後休") { start = "13:00"; }
-      setFormData(prev => ({ ...prev, absenceType: type, 開始時間: start, 終了時間: end }));
+      setFormData(prev => ({ ...prev, absenceType: type, start_time: start, end_time: end }));
     }
   };
 
@@ -529,7 +551,7 @@ function WhiteboardContent() {
     let start = "08:00"; let end = "17:00";
     if (type === "午前休") { end = "12:00"; }
     else if (type === "午後休") { start = "13:00"; }
-    setFormData(prev => ({ ...prev, absenceType: type, 開始時間: start, 終了時間: end }));
+    setFormData(prev => ({ ...prev, absenceType: type, start_time: start, end_time: end }));
   };
 
   const openDetail = (schedule: any, e: React.MouseEvent) => {
@@ -540,16 +562,15 @@ function WhiteboardContent() {
 
   const openNewForm = () => {
     setIsAbsenceMode(false);
-    setFormData(prev => ({
-      ...prev, タイムスタンプ: '', 日付: dateString, 担当者: currentUser || assignees[0], 開始時間: '', 終了時間: '', 訪問先: '', locationDetail: '', wbItem: '', wbItemDetail: '', エリア: '', 依頼内容: '', 作業内容: '', メモ: '', absenceType: '1日休み'
-    }));
+    setFormData({
+      id: '', date: dateString, assignee: currentUser || assignees[0], start_time: '', end_time: '', destination: '', area: '', client: '', item: '', part_number: '', request_content: '', work_content: '', work_type: '修理', tech_fee: '0', repair_amount: '0', sales_amount: '0', proposal_exists: '無', proposal_content: '', remote_highway_fee: '無', slip_number: '', status: '未完了(予定)', memo: '', locationDetail: '', wbItem: '', wbItemDetail: '', absenceType: '1日休み', report_data_id: ''
+    });
     setIsFormOpen(true);
   };
 
-  // 他人の予定ブロック機能
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>, staff: string, targetDateStr: string) => {
     if (currentUser && currentUser !== staff) {
-      alert(`※ 他の担当者（${staff}さん）の予定は作成できません。\n（全員の予定を作成する場合は、右上のユーザーを「未選択」にしてください）`);
+      alert(`※ 他の担当者（${staff}さん）の予定は作成できません。`);
       return;
     }
 
@@ -565,403 +586,405 @@ function WhiteboardContent() {
     const endStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
 
     setIsAbsenceMode(false);
-    setFormData(prev => ({
-      ...prev, タイムスタンプ: '', 日付: targetDateStr, 担当者: staff, 開始時間: startStr, 終了時間: endStr, 訪問先: '', locationDetail: '', wbItem: '', wbItemDetail: '', エリア: '', 依頼内容: '', 作業内容: '', メモ: '', absenceType: '1日休み'
-    }));
+    setFormData({
+      id: '', date: targetDateStr, assignee: staff, start_time: startStr, end_time: endStr, destination: '', area: '', client: '', item: '', part_number: '', request_content: '', work_content: '', work_type: '修理', tech_fee: '0', repair_amount: '0', sales_amount: '0', proposal_exists: '無', proposal_content: '', remote_highway_fee: '無', slip_number: '', status: '未完了(予定)', memo: '', locationDetail: '', wbItem: '', wbItemDetail: '', absenceType: '1日休み', report_data_id: ''
+    });
     setIsFormOpen(true);
   };
 
   const openEditForm = () => {
     setIsAbsenceMode(selectedSchedule.isAbsence);
-    setFormData({ ...formData, ...selectedSchedule });
+    const updatedForm = { ...formData, ...selectedSchedule };
+    setFormData(updatedForm);
     setIsDetailOpen(false);
     setIsFormOpen(true);
   };
 
   const handleDelete = async () => {
-    if (!confirm("本当に削除しますか？\n（日報入力画面からも完全に消去されます）")) return;
+    if (!confirm("本当に削除しますか？")) return;
     setIsDetailOpen(false);
     setIsLoading(true);
     try {
-      const payload = { action: 'delete', タイムスタンプ: selectedSchedule.タイムスタンプ };
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-      await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
+      const payload = { 
+        action: 'delete', 
+        id: selectedSchedule.id 
+      };
+
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await res.json();
+      if (result.success === false) throw new Error(result.error);
       alert("予定を削除しました。");
       fetchData();
     } catch (error) {
-      alert("削除中にエラーが発生しました。");
+      alert("エラーが発生しました: " + error);
+    } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSaveToGAS = async (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
-    let combinedMemo = formData.メモ.replace(/【WB(予定|休み)】.*?(?:\n|$)/g, '').trim();
-    let finalPayload: any = { ...formData };
-
-    if (isAbsenceMode) {
-      const wbMarker = `【WB休み】種類:${formData.absenceType}`;
-      combinedMemo = combinedMemo ? `${wbMarker}\n${combinedMemo}` : wbMarker;
-      finalPayload.訪問先 = formData.absenceType; 
-      finalPayload.状況 = "休み";
-      finalPayload.エリア = "(-----)";
-      finalPayload.品目 = "(-----)";
-      finalPayload.依頼内容 = "(-----)";
-      finalPayload.作業内容 = "(-----)";
-      finalPayload.クライアント = "(-----)";
-    } else {
-      const finalItem = formData.wbItem === 'その他' ? formData.wbItemDetail : formData.wbItem;
-      const wbMarker = `【WB予定】場所:${formData.locationDetail} / 品目:${finalItem}`;
-      combinedMemo = combinedMemo ? `${wbMarker}\n${combinedMemo}` : wbMarker;
-      finalPayload.エリア = formData.エリア || "(-----)";
-      finalPayload.品目 = "(-----)"; 
-      finalPayload.依頼内容 = formData.依頼内容 || "(-----)";
-      finalPayload.作業内容 = formData.作業内容 || "(-----)";
-      finalPayload.クライアント = formData.クライアント || "(-----)";
-    }
-    
-    finalPayload.メモ = combinedMemo;
-    finalPayload.action = formData.タイムスタンプ ? 'update' : 'create';
-
     try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(finalPayload));
-      await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody });
-      alert(formData.タイムスタンプ ? "予定を更新しました！" : "予定を登録しました！");
+      let finalMemo = formData.memo || "";
+      if (isAbsenceMode) {
+        finalMemo = `【WB休み】種類:${formData.absenceType}\n${finalMemo}`;
+      } else if (formData.wbItem) {
+        const itemLabel = formData.wbItem === 'その他' ? (formData.wbItemDetail || '') : formData.wbItem;
+        const locLabel = formData.area && formData.destination 
+          ? `${formData.area} / ${formData.destination}` 
+          : (formData.area || formData.destination || "");
+        finalMemo = `【WB予定】場所:${locLabel} / 品目:${itemLabel}\n${finalMemo}`;
+      }
+
+      // 表示用のラベルを エリア / 訪問先 の形式で生成
+      const formattedLocation = formData.area && formData.locationDetail 
+        ? `${formData.area} / ${formData.locationDetail}` 
+        : (formData.area || formData.locationDetail || "");
+
+      const payload = {
+        ...formData,
+        // スプレッドシートの項目名にマッピング
+        area: isAbsenceMode ? "(お休み)" : formData.area,
+        destination: isAbsenceMode ? formData.absenceType : formData.destination,
+        work_type: isAbsenceMode ? "お休み" : "修理",
+        item: isAbsenceMode ? "" : (formData.wbItem === 'その他' ? (formData.wbItemDetail || 'その他') : formData.wbItem),
+        action: formData.id ? 'update' : 'create',
+        memo: finalMemo,
+        locationDetail: isAbsenceMode 
+          ? formData.absenceType 
+          : ((formData.area && formData.destination) ? `${formData.area} / ${formData.destination}` : (formData.area || formData.destination || "")) 
+      };
+
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (result.success === false) throw new Error(result.error);
+
       setIsFormOpen(false);
       fetchData();
     } catch (error) {
-      alert("通信エラーが発生しました。");
+      alert("保存エラー: " + error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const toggleNoticeConfirm = (noticeId: string) => {
-    if (!currentUser) return alert("ユーザーを選択してください");
-    const updatedNotices = notices.map(n => {
-      if (n.id === noticeId) {
-        const confirmed = n.confirmedBy.includes(currentUser);
-        return { ...n, confirmedBy: confirmed ? n.confirmedBy.filter((u: string) => u !== currentUser) : [...n.confirmedBy, currentUser] };
+  const deleteNotice = async (id: string) => {
+    if (!confirm("お知らせを削除しますか？")) return;
+    const updated = notices.filter(n => n.id !== id);
+    setNotices(updated);
+    await syncNoticesToGAS(updated);
+  };
+
+  const toggleNoticeConfirm = async (id: string) => {
+    if (!currentUser) {
+      alert("担当者を選択してください。");
+      return;
+    }
+    const updated = notices.map(n => {
+      if (n.id === id) {
+        const confs = Array.isArray(n.confirmedBy) ? [...n.confirmedBy] : [];
+        if (confs.includes(currentUser)) {
+          return { ...n, confirmedBy: confs.filter(c => c !== currentUser) };
+        } else {
+          return { ...n, confirmedBy: [...confs, currentUser] };
+        }
       }
       return n;
     });
-    setNotices(updatedNotices);
-    syncNoticesToGAS(updatedNotices);
+    setNotices(updated);
+    await syncNoticesToGAS(updated);
   };
 
-  const deleteNotice = (noticeId: string) => {
-    if (!confirm("このお知らせを削除しますか？")) return;
-    const updatedNotices = notices.filter(n => n.id !== noticeId);
-    setNotices(updatedNotices);
-    syncNoticesToGAS(updatedNotices);
-  };
-
-  const handleAddNotice = (e: React.FormEvent) => {
+  const handleNoticeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if(!newNoticeText || !currentUser) return;
-    const newNotice = { id: Date.now().toString(), date: noticeTargetDate, text: newNoticeText, author: currentUser, confirmedBy: [] };
-    const updatedNotices = [...notices, newNotice];
-    setNotices(updatedNotices);
-    syncNoticesToGAS(updatedNotices);
-    setNewNoticeText("");
+    if (!newNoticeText.trim() || !currentUser) return;
+    const newN = {
+      id: `notice-${Date.now()}`,
+      date: noticeTargetDate,
+      author: currentUser,
+      text: newNoticeText,
+      confirmedBy: [],
+      isActive: true,
+      isUrgent: false
+    };
+    const updated = [newN, ...notices];
+    setNotices(updated);
     setIsNoticeFormOpen(false);
+    setNewNoticeText("");
+    await syncNoticesToGAS(updated);
   };
 
-  if (!mounted) return <div className="min-h-screen bg-[#f8f6f0]" />;
-
-  const inputBaseClass = "w-full bg-white border border-gray-300 rounded-[10px] px-3 py-2.5 text-[16px] text-gray-800 focus:outline-none focus:border-[#eaaa43] transition-all appearance-none";
-  const selectWrapperClass = "relative after:content-['▼'] after:text-gray-400 after:text-[10px] after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:pointer-events-none";
-
-
-  const isEditable = !currentUser || !selectedSchedule || currentUser === selectedSchedule.担当者;
+  if (!mounted) return null;
 
   return (
-    <div className="h-screen bg-[#f8f6f0] font-sans text-slate-800 flex flex-col overflow-hidden">
-      
-      {/* --- ヘッダー領域 --- */}
-      <div className="flex-none pt-4 pb-2 px-2 bg-[#f8f6f0] shadow-sm z-40 border-b border-gray-200">
-        <div className="max-w-md mx-auto flex flex-col gap-2">
-          <div className="flex items-center justify-between px-1 mb-1">
-            <Link href="/" className="text-[#eaaa43] font-black text-[12px] flex items-center active:scale-95 transition-transform">＜ 戻る</Link>
-            <div className="flex items-center bg-white/50 px-2 py-1 rounded-full border border-gray-200 shadow-sm">
-              <span className="text-[10px] mr-1">👤</span>
-              <select value={currentUser} onChange={handleUserChange} className="bg-transparent text-xs font-bold text-gray-800 outline-none appearance-none">
-                <option value="">未選択</option>
-                {assignees.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center">
+      {/* 画面上部 */}
+      <div className="w-full max-w-[1200px] bg-white shadow-sm px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3 sticky top-0 z-[60]">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="text-gray-400 hover:text-orange-500 transition-colors flex items-center gap-1 font-bold text-sm">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+              ホーム
+            </Link>
+            <div className="w-[1px] h-4 bg-gray-200"></div>
+            <Link href="/report" className="text-orange-500 font-bold flex items-center hover:opacity-70 transition-opacity text-sm">
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path></svg>
+              戻る
+            </Link>
           </div>
-          
-          <div className="flex gap-2">
-            <button onClick={() => setViewMode('daily')} className={`flex-1 py-1.5 rounded-xl font-black text-[11px] transition-all shadow-sm ${viewMode === 'daily' ? 'bg-[#eaaa43] text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>日別 (1日)</button>
-            <button onClick={() => setViewMode('weekly')} className={`flex-1 py-1.5 rounded-xl font-black text-[11px] transition-all shadow-sm ${viewMode === 'weekly' ? 'bg-[#eaaa43] text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>週別 (1週間)</button>
+          <div className="bg-gray-100 px-3 py-1.5 rounded-full flex items-center gap-2 border border-gray-200">
+             <span className="text-[10px] text-gray-400 font-bold">👤</span>
+             <select value={currentUser} onChange={handleUserChange} className="bg-transparent text-xs font-bold outline-none cursor-pointer">
+               <option value="">未選択</option>
+               {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+             </select>
+          </div>
+        </div>
+
+        <div className="flex bg-orange-100/50 p-1 rounded-xl">
+           <div className="px-6 py-1.5 rounded-lg text-xs font-black bg-[#eaaa43] text-white shadow-sm">日別 (1日)</div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center bg-white border border-gray-200 rounded-full px-4 py-1.5 shadow-sm">
+            <button onClick={() => addDays(-1)} className="text-orange-500 font-black p-1 active:scale-90 transition-transform">◀</button>
+            <span className="text-sm font-black mx-4 text-gray-700 min-w-[100px] text-center">{formatDateDisplay(currentDate)}</span>
+            <button onClick={() => addDays(1)} className="text-orange-500 font-black p-1 active:scale-90 transition-transform">▶</button>
+          </div>
+          <button onClick={openNewForm} className="bg-[#eaaa43] text-white px-4 py-1.5 rounded-full text-xs font-black shadow-sm active:scale-95 transition-transform">＋ 新規作成</button>
+        </div>
+      </div>
+
+      <div className="w-full flex justify-center bg-white border-b border-gray-100 py-1">
+         <button onClick={() => setIsZoomed(!isZoomed)} className="text-[10px] font-bold text-gray-400 flex items-center gap-1 active:scale-95 transition-transform">
+           {isZoomed ? '🔍 縮小する' : '⤢ スクショ用に1画面に縮小する'}
+         </button>
+      </div>
+
+      {/* タイムライン表示エリア */}
+      <div className="w-full max-w-[1240px] overflow-x-auto bg-white shadow-sm [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-orange-200 [&::-webkit-scrollbar-track]:bg-gray-50">
+        <div className="min-w-[800px] flex flex-col">
+          {/* スタッフヘッダー */}
+          <div className="flex w-full sticky top-0 z-40 bg-white border-b border-gray-100 pt-2">
+            <div className="w-[36px] shrink-0"></div>
+            {assignees.map(staff => (
+              <div key={staff} className={`flex-1 flex justify-center py-2 px-1 border-r border-gray-50 last:border-r-0 ${staffStyles[staff].headerBg} rounded-t-xl mx-0.5 font-black text-xs tracking-widest`}>
+                {staff}
+              </div>
+            ))}
           </div>
 
-          <div className="flex items-center justify-between mt-1">
-            <div className="flex items-center gap-1 bg-white px-2 py-1.5 rounded-xl shadow-sm border border-gray-100">
-              <button onClick={() => addDays(viewMode === 'daily' ? -1 : -7)} className="text-[#eaaa43] font-black px-2 active:scale-90 transition-transform">◀</button>
-              <span className="font-black text-[11px] tracking-widest text-center min-w-[90px]">
-                {viewMode === 'daily' ? formatDateDisplay(currentDate) : `${formatDateDisplay(getWeekDates()[0])}〜`}
-              </span>
-              <button onClick={() => addDays(viewMode === 'daily' ? 1 : 7)} className="text-[#eaaa43] font-black px-2 active:scale-90 transition-transform">▶</button>
-            </div>
-            <div className="flex gap-2">
-              <Link href="/report" className="bg-blue-50 text-blue-500 border border-blue-200 font-black text-[10px] py-1.5 px-2 rounded-xl active:scale-95 transition-transform shadow-sm">日報入力へ</Link>
-              <button onClick={openNewForm} className="bg-white text-[#eaaa43] border border-[#eaaa43] font-black text-[10px] py-1.5 px-2 rounded-xl shadow-sm active:scale-95 transition-transform">＋ 新規作成</button>
-            </div>
-          </div>
-
-          {/* ★ UI改善：スタイリッシュな1ボタン縮小機能 */}
-          <div className="mt-1 pt-1 border-t border-gray-200">
-            <button 
-              onClick={() => setIsZoomed(!isZoomed)} 
-              className={`w-full py-2 rounded-xl font-black text-[11px] transition-all shadow-sm flex justify-center items-center gap-1.5 ${isZoomed ? 'bg-[#eaaa43] text-white' : 'bg-white text-gray-500 border border-gray-200'}`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                {isZoomed ? (
-                  <><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></>
-                ) : (
-                  <><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></>
-                )}
-              </svg>
-              {isZoomed ? "標準サイズに戻す" : "スクショ用に1画面に縮小する"}
-            </button>
+          {/* コンテンツ */}
+          <div className="flex w-full relative">
+            {viewMode === 'daily' && (
+              <div className="flex-1 flex flex-col">
+                <NoticeBanner 
+                  targetDateStr={dateString} 
+                  notices={notices} 
+                  currentUser={currentUser} 
+                  deleteNotice={deleteNotice} 
+                  toggleNoticeConfirm={toggleNoticeConfirm} 
+                  setNoticeTargetDate={setNoticeTargetDate} 
+                  setIsNoticeFormOpen={setIsNoticeFormOpen} 
+                />
+                <TimelineCanvas 
+                  targetDateStr={dateString} 
+                  schedules={schedules} 
+                  setSchedules={setSchedules} 
+                  openDetail={openDetail} 
+                  handleCanvasClick={handleCanvasClick} 
+                  fetchData={fetchData} 
+                  isZoomed={isZoomed} 
+                  dynamicHourHeight={dynamicHourHeight} 
+                  dynamicMinBlock={dynamicMinBlock} 
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* --- メインキャンバス領域 --- */}
-      <div className="flex-1 overflow-y-auto bg-[#f8f6f0] pb-[80px]">
-        <div className="sticky top-0 z-30 flex pl-[36px] bg-[#f8f6f0]/95 backdrop-blur-sm border-b border-gray-200 py-1 shadow-sm">
-          {assignees.map(staff => (
-            <div key={staff} className="flex-1 text-center">
-              <div className={`mx-0.5 py-1 rounded-[6px] ${staffStyles[staff].headerBg} border-b-2 ${staffStyles[staff].border}`}><span className="font-black text-[10px]">{staff}</span></div>
-            </div>
-          ))}
-        </div>
-
-        {viewMode === 'daily' ? (
-           <div className="flex flex-col relative">
-             <NoticeBanner targetDateStr={dateString} notices={notices} currentUser={currentUser} deleteNotice={deleteNotice} toggleNoticeConfirm={toggleNoticeConfirm} setNoticeTargetDate={setNoticeTargetDate} setIsNoticeFormOpen={setIsNoticeFormOpen} />
-             <TimelineCanvas targetDateStr={dateString} schedules={schedules} setSchedules={setSchedules} openDetail={openDetail} handleCanvasClick={handleCanvasClick} fetchData={fetchData} isZoomed={isZoomed} dynamicHourHeight={dynamicHourHeight} dynamicMinBlock={dynamicMinBlock} />
-           </div>
-        ) : (
-           <div className="flex flex-col gap-4 py-2">
-             {getWeekDates().map((date, i) => {
-               const dStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-               return (
-                 <div key={i} className="bg-white rounded-xl shadow-sm mx-1 overflow-hidden border border-gray-200 mt-2">
-                   <div className="bg-gray-100 px-3 py-1.5 font-black text-xs text-gray-700 border-b border-gray-200">
-                     {formatDateDisplay(date)}
-                   </div>
-                    <NoticeBanner targetDateStr={dStr} notices={notices} currentUser={currentUser} deleteNotice={deleteNotice} toggleNoticeConfirm={toggleNoticeConfirm} setNoticeTargetDate={setNoticeTargetDate} setIsNoticeFormOpen={setIsNoticeFormOpen} />
-                    <TimelineCanvas targetDateStr={dStr} schedules={schedules} setSchedules={setSchedules} openDetail={openDetail} handleCanvasClick={handleCanvasClick} fetchData={fetchData} isZoomed={isZoomed} dynamicHourHeight={dynamicHourHeight} dynamicMinBlock={dynamicMinBlock} />
-                 </div>
-               );
-             })}
-           </div>
-        )}
-      </div>
-
-      {/* --- 詳細モーダル --- */}
+      {/* 詳細モーダル */}
       {isDetailOpen && selectedSchedule && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setIsDetailOpen(false)}>
-          <div className="bg-[#f8f6f0] w-full max-w-sm rounded-[20px] shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className={`px-5 py-3 flex justify-between items-center text-white ${selectedSchedule.isAbsence ? 'bg-red-500' : staffStyles[selectedSchedule.担当者].dot}`}>
-              <h2 className="font-black text-sm tracking-widest">{selectedSchedule.isAbsence ? '休み設定の詳細' : '予定の詳細'}</h2>
-              <button onClick={() => setIsDetailOpen(false)} className="text-xl leading-none">&times;</button>
+        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setIsDetailOpen(false)}>
+          <div className="bg-white rounded-[24px] w-full max-w-sm overflow-hidden shadow-2xl transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            <div className={`p-6 ${selectedSchedule.isAbsence ? 'bg-red-500' : 'bg-[#eaaa43]'} text-white relative`}>
+               <button onClick={() => setIsDetailOpen(false)} className="absolute top-4 right-4 text-white hover:opacity-70 transition-opacity">
+                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+               </button>
+               <div className="text-[11px] font-black bg-white/20 inline-block px-2 py-0.5 rounded-full mb-2 uppercase tracking-widest">Details</div>
+               <h3 className="text-xl font-black">{selectedSchedule.isAbsence ? selectedSchedule.absenceType : (selectedSchedule.wbItem === 'その他' ? selectedSchedule.wbItemDetail : selectedSchedule.wbItem)}</h3>
+               <div className="flex items-center gap-2 mt-2 opacity-90 text-sm font-bold">
+                 <span>🕒 {selectedSchedule.start_time} - {selectedSchedule.end_time}</span>
+                 <span className="bg-white/30 px-2 py-0.5 rounded-md">👤 {selectedSchedule.assignee}</span>
+               </div>
             </div>
-            <div className="p-5 bg-white space-y-2">
-              <p className="text-xs"><strong>担当:</strong> {selectedSchedule.担当者}</p>
-              <p className="text-xs"><strong>時間:</strong> {selectedSchedule.開始時間} 〜 {selectedSchedule.終了時間}</p>
-              {selectedSchedule.isAbsence ? (
-                <p className="text-xs text-red-600 font-bold"><strong>種類:</strong> {selectedSchedule.absenceType}</p>
-              ) : (
-                <>
-                  <p className="text-xs"><strong>訪問先:</strong> {selectedSchedule.訪問先}</p>
-                  <p className="text-xs"><strong>場所:</strong> {selectedSchedule.locationDetail}</p>
-                  <p className="text-xs"><strong>品目:</strong> {selectedSchedule.wbItem === 'その他' ? selectedSchedule.wbItemDetail : selectedSchedule.wbItem}</p>
-                </>
-              )}
-            </div>
-            
-            <div className="p-4 bg-gray-50 flex gap-2">
-              <button onClick={() => setIsDetailOpen(false)} className="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold active:scale-95 transition-transform">閉じる</button>
-              
-              {isEditable ? (
-                <>
-                  <button onClick={handleDelete} className="flex-1 bg-white border border-red-500 text-red-500 py-2.5 rounded-xl text-sm font-bold active:scale-95 transition-transform">🗑️ 削除</button>
-                  <button onClick={openEditForm} className="flex-1 bg-[#eaaa43] text-white py-2.5 rounded-xl text-sm font-black tracking-widest active:scale-95 transition-transform">編集する</button>
-                </>
-              ) : (
-                <div className="flex-1 text-center text-[10px] text-gray-400 font-bold self-center flex flex-col">
-                  <span>※他の担当者の予定は</span>
-                  <span>編集・削除できません</span>
-                </div>
-              )}
+            <div className="p-6 space-y-4">
+               {!selectedSchedule.isAbsence && (
+                 <div>
+                   <label className="text-[10px] font-black text-gray-400 block mb-1 uppercase tracking-wider">Location / Destination</label>
+                   <p className="text-sm font-black text-gray-800 leading-snug">{selectedSchedule.locationDetail}</p>
+                 </div>
+               )}
+               {selectedSchedule.memo && (
+                 <div>
+                   <label className="text-[10px] font-black text-gray-400 block mb-1 uppercase tracking-wider">Memo / Notes</label>
+                   <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                     <p className="text-xs text-gray-600 font-bold leading-relaxed whitespace-pre-wrap">{selectedSchedule.memo}</p>
+                   </div>
+                 </div>
+               )}
+               <div className="flex gap-3 pt-2">
+                 <button onClick={handleDelete} className="flex-1 bg-red-50 text-red-500 py-3 rounded-xl font-black text-xs border border-red-100 active:scale-95 transition-all">削除する</button>
+                 <button onClick={openEditForm} className="flex-1 bg-[#eaaa43] text-white py-3 rounded-xl font-black text-xs shadow-md active:scale-95 transition-all">編集する</button>
+               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- 予定登録フォーム --- */}
+      {/* 登録・編集フォームモーダル */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center sm:p-4">
-          <div className="bg-[#f8f6f0] rounded-t-[20px] sm:rounded-[20px] w-full max-w-md max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-            <div className="bg-white px-4 py-3 border-b flex justify-between items-center z-10 shrink-0">
-              <h2 className="font-black text-[#eaaa43] text-sm">{formData.タイムスタンプ ? '予定の編集' : '予定を登録'}</h2>
-              <button onClick={() => setIsFormOpen(false)} className="text-gray-400 text-2xl leading-none">&times;</button>
+        <div className="fixed inset-0 bg-black/60 z-[200] overflow-y-auto p-4 flex items-center justify-center animate-fade-in">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl relative">
+            <div className={`p-6 rounded-t-[24px] ${isAbsenceMode ? 'bg-red-500' : 'bg-[#eaaa43]'} text-white`}>
+              <button onClick={() => setIsFormOpen(false)} className="absolute top-6 right-6 text-white hover:opacity-70 transition-opacity">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+              <h3 className="text-lg font-black tracking-widest">{formData.id ? '予定の編集' : '新規予定の登録'}</h3>
+              <div className="flex gap-2 mt-4 bg-white/20 p-1 rounded-xl">
+                 <button type="button" onClick={() => handleAbsenceModeSwitch(false)} className={`flex-1 py-1.5 text-[11px] font-black rounded-lg transition-all ${!isAbsenceMode ? 'bg-white text-gray-800' : 'text-white'}`}>通常予定</button>
+                 <button type="button" onClick={() => handleAbsenceModeSwitch(true)} className={`flex-1 py-1.5 text-[11px] font-black rounded-lg transition-all ${isAbsenceMode ? 'bg-white text-red-500' : 'text-white'}`}>お休み・半休</button>
+              </div>
             </div>
 
-            <div className="overflow-y-auto p-4 flex-1">
-              <div className="flex bg-gray-200 rounded-lg p-1 mb-4">
-                <button type="button" onClick={() => handleAbsenceModeSwitch(false)} className={`flex-1 py-2 rounded-md font-black text-[11px] transition-colors ${!isAbsenceMode ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>🛠 通常の予定</button>
-                <button type="button" onClick={() => handleAbsenceModeSwitch(true)} className={`flex-1 py-2 rounded-md font-black text-[11px] transition-colors ${isAbsenceMode ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500'}`}>🏖️ 休み登録</button>
+            <form onSubmit={handleFormSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Assignee</label>
+                  <select name="assignee" value={formData.assignee} onChange={handleFormChange} required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]">
+                    {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Date</label>
+                  <input type="date" name="date" value={formData.date} onChange={handleFormChange} required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]" />
+                </div>
               </div>
 
-              <form onSubmit={handleSaveToGAS} className="space-y-4 pb-10">
-                <div className="bg-white p-3 rounded-xl shadow-sm space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className={selectWrapperClass}>
-                      <label className="block text-[10px] font-bold text-gray-600 mb-0.5">担当者</label>
-                      <select name="担当者" value={formData.担当者} onChange={handleFormChange} required className={inputBaseClass}>
-                        <option value="">(選択)</option>{assignees.map(a => <option key={a} value={a}>{a}</option>)}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Start</label>
+                  <input type="time" name="start_time" value={formData.start_time} onChange={handleStartTimeChange} required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">End</label>
+                  <input type="time" name="end_time" value={formData.end_time} onChange={handleFormChange} required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]" />
+                </div>
+              </div>
+
+              {!isAbsenceMode ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Work Category</label>
+                      <select name="wbItem" value={formData.wbItem} onChange={handleFormChange} required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]">
+                        <option value="">選択してください</option>
+                        {wbItems.map(item => <option key={item} value={item}>{item}</option>)}
                       </select>
                     </div>
+                    {formData.wbItem === 'その他' && (
+                      <div className="animate-fade-in">
+                        <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Other Detail</label>
+                        <input type="text" name="wbItemDetail" value={formData.wbItemDetail} onChange={handleFormChange} placeholder="具体的な項目名" required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-600 mb-0.5">日付</label>
-                      <input type="date" name="日付" value={formData.日付} onChange={handleFormChange} required className={inputBaseClass} />
+                      <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Area</label>
+                      <input type="text" name="area" value={formData.area} onChange={handleFormChange} placeholder="例: 霧島エリア" required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43]" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Location / Destination</label>
+                      <input type="text" name="destination" value={formData.destination} onChange={handleFormChange} placeholder="現場名・訪問先" required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-[#eaaa43]" />
                     </div>
                   </div>
-
-                  {isAbsenceMode ? (
-                    <div className="border-t border-gray-100 pt-3">
-                       <div className={selectWrapperClass}>
-                         <label className="block text-[10px] font-bold text-red-500 mb-0.5">休みの種類</label>
-                         <select name="absenceType" value={formData.absenceType} onChange={handleAbsenceTypeChange} className={`${inputBaseClass} border-red-200 focus:border-red-500`}>
-                           {absenceTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                         </select>
-                       </div>
-                       <div className="flex gap-2 mt-2">
-                         <input type="time" name="開始時間" value={formData.開始時間} onChange={handleFormChange} required className={`${inputBaseClass} text-xs`} />
-                         <span className="self-center font-bold text-gray-400">〜</span>
-                         <input type="time" name="終了時間" value={formData.終了時間} onChange={handleFormChange} required className={`${inputBaseClass} text-xs`} />
-                       </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 border-t border-gray-100 pt-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">開始時間</label>
-                        <input type="time" name="開始時間" value={formData.開始時間} onChange={handleStartTimeChange} required className={inputBaseClass} />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">終了時間</label>
-                        <input type="time" name="終了時間" value={formData.終了時間} onChange={handleFormChange} required className={inputBaseClass} />
-                      </div>
-                    </div>
-                  )}
+                </>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Absence Category</label>
+                  <select name="absenceType" value={formData.absenceType} onChange={handleAbsenceTypeChange} required className="w-full bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm font-bold text-red-600 outline-none focus:border-red-400">
+                    {absenceTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                  </select>
                 </div>
+              )}
 
-                {!isAbsenceMode && (
-                  <>
-                    <div className="bg-white p-3 rounded-xl shadow-sm space-y-3 border-l-4 border-blue-400">
-                      <p className="text-[9px] font-bold text-blue-500 mb-1">▼ 日報入力側にも登録される項目</p>
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">訪問先名（顧客名など）</label>
-                        <input type="text" name="訪問先" value={formData.訪問先} onChange={handleFormChange} required className={inputBaseClass} />
-                      </div>
-                      <div className={selectWrapperClass}>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">エリア</label>
-                        <select name="エリア" value={formData.エリア} onChange={handleFormChange} className={inputBaseClass}>
-                          <option value="">(任意)</option>
-                          {areas.map(a => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">場所の詳細 (WB表示用)</label>
-                        <input type="text" name="locationDetail" value={formData.locationDetail} onChange={handleFormChange} required className={inputBaseClass} />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-2 border-t border-gray-100 pt-3">
-                        <div className={selectWrapperClass}>
-                          <label className="block text-[10px] font-bold text-gray-600 mb-0.5">依頼内容</label>
-                          <select name="依頼内容" value={formData.依頼内容} onChange={handleFormChange} className={inputBaseClass}>
-                            <option value="">(任意)</option>
-                            {requestContents.map(r => <option key={r} value={r}>{r}</option>)}
-                          </select>
-                        </div>
-                        <div className={selectWrapperClass}>
-                          <label className="block text-[10px] font-bold text-gray-600 mb-0.5">作業内容</label>
-                          <select name="作業内容" value={formData.作業内容} onChange={handleFormChange} className={inputBaseClass}>
-                            <option value="">(任意)</option>
-                            {workContents.map(w => <option key={w} value={w}>{w}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 mb-1 ml-1 block uppercase">Memo</label>
+                <textarea name="memo" value={formData.memo} onChange={handleFormChange} rows={3} placeholder="特記事項など" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#eaaa43] resize-none" />
+              </div>
 
-                    <div className="bg-white p-3 rounded-xl shadow-sm space-y-3 border-l-4 border-[#eaaa43]">
-                      <p className="text-[9px] font-bold text-[#eaaa43] mb-1">▼ ホワイトボード専用項目</p>
-                      <div className={selectWrapperClass}>
-                        <label className="block text-[10px] font-bold text-gray-600 mb-0.5">品目 (WB用)</label>
-                        <select name="wbItem" value={formData.wbItem} onChange={handleFormChange} required className={inputBaseClass}>
-                          <option value="">(選択)</option>
-                          {wbItems.map(i => <option key={i} value={i}>{i}</option>)}
-                        </select>
-                      </div>
-                      {formData.wbItem === 'その他' && (
-                        <input type="text" name="wbItemDetail" value={formData.wbItemDetail} onChange={handleFormChange} placeholder="詳細を入力" required className={inputBaseClass} />
-                      )}
-                    </div>
-                  </>
-                )}
-
-                <button type="submit" disabled={isSubmitting} className={`w-full py-3.5 rounded-xl text-sm font-black tracking-widest active:scale-95 transition-transform shadow-md disabled:bg-gray-400 ${isAbsenceMode ? 'bg-red-500 text-white' : 'bg-[#eaaa43] text-white'}`}>
-                  {isSubmitting ? '送信中...' : (isAbsenceMode ? '休みを登録する' : (formData.タイムスタンプ ? '更新して保存する' : '予定を登録する'))}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setIsFormOpen(false)} className="flex-1 bg-gray-100 text-gray-500 py-4 rounded-xl font-black text-xs active:scale-95 transition-transform">キャンセル</button>
+                <button type="submit" disabled={isSubmitting} className={`flex-1 ${isAbsenceMode ? 'bg-red-500' : 'bg-[#eaaa43]'} text-white py-4 rounded-xl font-black text-xs shadow-md active:scale-95 transition-transform disabled:opacity-50`}>
+                  {isSubmitting ? '保存中...' : (formData.id ? '上書き保存する' : '新しく登録する')}
                 </button>
-              </form>
-            </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* --- お知らせ追加モーダル --- */}
+      {/* お知らせ登録用ミニモーダル */}
       {isNoticeFormOpen && (
-        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-sm rounded-[20px] p-5 shadow-2xl">
-             <h3 className="font-black text-[#eaaa43] mb-3 text-sm">{noticeTargetDate} のお知らせを追加</h3>
-             <form onSubmit={handleAddNotice} className="space-y-4">
-               <textarea value={newNoticeText} onChange={(e) => setNewNoticeText(e.target.value)} placeholder="例：午後から運搬車を使います" className={`${inputBaseClass} h-24 resize-none`} required />
-               <div className="flex gap-2">
-                 <button type="button" onClick={() => setIsNoticeFormOpen(false)} className="flex-1 bg-gray-100 text-gray-600 py-2.5 rounded-xl text-sm font-bold active:scale-95 transition-transform">キャンセル</button>
-                 <button type="submit" className="flex-1 bg-[#eaaa43] text-white py-2.5 rounded-xl text-sm font-black tracking-widest active:scale-95 transition-transform">追加する</button>
-               </div>
-             </form>
-          </div>
+        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setIsNoticeFormOpen(false)}>
+           <div className="bg-white rounded-[24px] w-full max-w-sm p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+              <h3 className="text-[#eaaa43] font-black tracking-widest text-base mb-1">お知らせを追加</h3>
+              <p className="text-[10px] text-gray-400 font-bold mb-4">{noticeTargetDate} のホワイトボード上に表示されます</p>
+              <form onSubmit={handleNoticeSubmit} className="space-y-4">
+                 <textarea 
+                    value={newNoticeText} 
+                    onChange={e => setNewNoticeText(e.target.value)} 
+                    placeholder="スタッフ全員に周知する内容を入力してください..." 
+                    required 
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-[#eaaa43] h-28 resize-none"
+                 />
+                 <div className="flex gap-3">
+                    <button type="button" onClick={() => setIsNoticeFormOpen(false)} className="flex-1 text-gray-400 font-black text-xs">キャンセル</button>
+                    <button type="submit" className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl py-3 font-black text-xs shadow-md active:scale-95 transition-transform">投稿する</button>
+                 </div>
+              </form>
+           </div>
         </div>
       )}
 
-      {/* --- フッター --- */}
-      {/* --- ホームへ戻る専用ボタン --- */}
-      <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
-        <Link href="/" className="pointer-events-auto bg-white/90 backdrop-blur-lg border border-orange-100/50 px-10 py-3.5 rounded-[22px] shadow-[0_10px_40px_rgba(0,0,0,0.08)] flex items-center gap-3 group active:scale-95 transition-all text-[#eaaa43]">
-          <div className="w-8 h-8 bg-orange-50 rounded-full flex items-center justify-center group-hover:bg-[#eaaa43] group-hover:text-white transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
-          </div>
-          <span className="font-black text-[15px] tracking-[0.2em] pt-0.5">ホームに戻る</span>
-        </Link>
-      </div>
+      {/* ローディングオーバーレイ */}
+      {isLoading && schedules.length === 0 && (
+        <div className="fixed inset-0 bg-white/70 backdrop-blur-sm z-[100] flex justify-center items-center">
+           <div className="bg-white px-8 py-5 rounded-[20px] shadow-xl flex items-center gap-4 border border-orange-50">
+             <div className="w-5 h-5 border-4 border-[#eaaa43] border-t-transparent rounded-full animate-spin"></div>
+             <span className="text-[#eaaa43] font-black text-sm tracking-widest">データを読込中...</span>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function WhiteboardPage() {
+export default function Page() {
   return (
-    <Suspense fallback={<div className="flex justify-center items-center h-screen bg-[#f8f6f0] text-[#eaaa43] font-black text-sm">カレンダーを準備中...</div>}>
+    <Suspense fallback={null}>
       <WhiteboardContent />
     </Suspense>
   );

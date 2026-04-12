@@ -4,9 +4,8 @@ import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
-
-const assignees = ["佐藤", "田中", "南", "新田", "德重"];
+const GAS_URL = '/api/gas';
+const assignees = ["佐藤", "田中", "南", "新田", "德重", "前田"];
 const areas = ["市内南部エリア", "市街地エリア", "市内北部エリア", "日置エリア", "北薩エリア", "南薩エリア", "大隅エリア", "鹿屋エリア", "姶良エリア", "霧島エリア", "その他"];
 const clients = ["リビング", "ハウス", "ひだまり", "タカギ", "トータルサービス", "崎山不動産", "LTS"];
 const items = ["トイレ", "キッチン", "洗面", "浴室", "ドア", "窓サッシ", "水栓", "エクステリア", "照明換気設備", "内装設備", "外装設備"];
@@ -61,16 +60,13 @@ function HistoryList() {
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || ""; 
 
-  // ★ A-2同様、右上で担当者を切り替え可能
   const [currentWorker, setCurrentWorker] = useState(initialWorker);
   
-  // ★ 月選択のステート（初期値は今月）
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // ★ 過去24ヶ月分 + 全期間の選択肢を生成
   const monthOptions = React.useMemo(() => {
     const options = [{ value: "all", label: "全期間 (過去すべて)" }];
     const current = new Date();
@@ -83,37 +79,36 @@ function HistoryList() {
     return options;
   }, []);
 
-  // ★ 案件検索用のステート
   const [searchKeyword, setSearchKeyword] = useState("");
-
-  // ★ 日付検索用のステート
   const [searchDate, setSearchDate] = useState("");
-
   const [allData, setAllData] = useState<any[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // ★ 2段階アコーディオン用のステート
   const [expandedDate, setExpandedDate] = useState<string | null>(null); 
   const [expandedItemKey, setExpandedItemKey] = useState<string | null>(null); 
 
-  // 編集モード用のステート
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  
+  const [itemToDelete, setItemToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
       setExpandedDate(null);
       setExpandedItemKey(null);
-      // 担当者の全履歴を取得
       const res = await fetch(`${GAS_URL}?worker=${encodeURIComponent(currentWorker)}`);
-      if (!res.ok) throw new Error("通信エラー");
       const json = await res.json();
-      setAllData(json);
+      if (json && json.success === false) {
+        throw new Error(json.error || "通信エラー");
+      }
+      setAllData(Array.isArray(json) ? json : []);
     } catch (err) {
-      setError("データの取得に失敗しました。");
+      const msg = err instanceof Error ? err.message : "データの取得に失敗しました。";
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -123,28 +118,25 @@ function HistoryList() {
     fetchData();
   }, [fetchData]);
 
-  // ★ データ加工ロジック：フィルタリングとグループ化
   const groupedData: Record<string, any[]> = {};
   
   allData.forEach(item => {
-    if (!item.日付) return;
-    const cleanDate = extractDateForInput(item.日付);
+    if (!item.date) return;
+    const cleanDate = extractDateForInput(item.date);
     if (!cleanDate) return;
     
     const itemMonth = cleanDate.substring(0, 7);
     const keyword = searchKeyword.trim().toLowerCase();
 
-    // 検索・フィルタリング条件の判定
     let matchesKeyword = true;
     if (keyword !== "") {
-      const targetStr = `${item.訪問先 || ""} ${item.クライアント || ""} ${item.依頼内容 || ""} ${item.作業内容 || ""} ${item.メモ || ""}`.toLowerCase();
+      const targetStr = `${item.destination || ""} ${item.client || ""} ${item.request_content || ""} ${item.work_content || ""} ${item.memo || ""}`.toLowerCase();
       matchesKeyword = targetStr.includes(keyword);
     }
 
     const matchesMonth = (selectedMonth === "all" || itemMonth === selectedMonth);
     const matchesDate = (!searchDate || cleanDate === searchDate);
 
-    // キーワード検索または日付検索が入力されている場合は、月選択の制約を無視して検索結果を表示する
     const isSearching = keyword !== "" || searchDate !== "";
     
     if (isSearching) {
@@ -157,18 +149,15 @@ function HistoryList() {
     groupedData[cleanDate].push(item);
   });
 
-  // 日付の降順（新しい日が上）にソートした配列を作成
   const sortedDates = Object.keys(groupedData).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
-  // 日付内のデータは時間順（朝から）にソート
   sortedDates.forEach(date => {
     groupedData[date].sort((a, b) => {
-      if (!a.開始時間 || !b.開始時間) return 0;
-      return a.開始時間 > b.開始時間 ? 1 : -1;
+      if (!a.start_time || !b.start_time) return 0;
+      return a.start_time > b.start_time ? 1 : -1;
     });
   });
 
-  // サマリー計算
   let totalCount = 0;
   let totalTech = 0;
   let totalRepair = 0;
@@ -177,31 +166,33 @@ function HistoryList() {
   Object.values(groupedData).forEach(dayItems => {
     totalCount += dayItems.length;
     dayItems.forEach(item => {
-      totalTech += (Number(item.技術料) || 0);
-      totalRepair += (Number(item.修理金額) || 0);
-      totalSales += (Number(item.販売金額) || 0);
+      totalTech += (Number(item.tech_fee) || 0);
+      totalRepair += (Number(item.repair_amount) || 0);
+      totalSales += (Number(item.sales_amount) || 0);
     });
   });
 
   const selectedMonthDisplay = selectedMonth.replace('-', '年') + '月';
 
-  // --- 編集用ハンドラー ---
   const openEditModal = (e: React.MouseEvent, item: any) => {
     e.stopPropagation();
     let isOtherProposal = false;
     let proposalDetail = "";
-    if (item.提案有無 === '有' && item.提案内容 && !proposalContents.includes(item.提案内容)) {
+    if (item.proposal_exists === '有' && item.proposal_content && !proposalContents.includes(item.proposal_content)) {
       isOtherProposal = true;
-      proposalDetail = item.提案内容;
+      proposalDetail = item.proposal_content;
     }
 
+    const isContracted = item.memo && item.memo.includes('【成約】');
+    
     setEditingItem({
       ...item,
-      日付: extractDateForInput(item.日付),
-      開始時間: extractTimeForInput(item.開始時間),
-      終了時間: extractTimeForInput(item.終了時間),
-      提案内容: isOtherProposal ? 'その他' : (item.提案内容 || ''),
-      提案内容詳細: proposalDetail
+      date: extractDateForInput(item.date),
+      start_time: extractTimeForInput(item.start_time),
+      end_time: extractTimeForInput(item.end_time),
+      proposal_content: isOtherProposal ? 'その他' : (item.proposal_content || ''),
+      proposal_detail: proposalDetail,
+      is_contracted: isContracted ? '有' : '無'
     });
     setSubmitMessage("");
   };
@@ -215,39 +206,89 @@ function HistoryList() {
     setEditingItem({ ...editingItem, [name]: value });
   };
 
+  const handleEditSeiyakuToggle = (value: string) => {
+    let newMemo = editingItem.memo || "";
+    if (value === '有') {
+      if (!newMemo.includes('【成約】')) {
+        newMemo = `【成約】\n${newMemo}`;
+      }
+    } else {
+      newMemo = newMemo.replace('【成約】\n', '').replace('【成約】', '');
+    }
+    setEditingItem({ ...editingItem, is_contracted: value, memo: newMemo });
+  };
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setSubmitMessage("");
 
-    const techFee = Number(editingItem.技術料) || 0;
-    const repairAmt = editingItem.作業区分 === '修理' ? (Number(editingItem.修理金額) || 0) : 0;
-    const salesAmt = editingItem.作業区分 === '販売' ? (Number(editingItem.販売金額) || 0) : 0;
-    const finalProposal = editingItem.提案内容 === 'その他' ? editingItem.提案内容詳細 : editingItem.提案内容;
+    const techFee = Number(editingItem.tech_fee) || 0;
+    const repairAmt = editingItem.work_type === '修理' ? (Number(editingItem.repair_amount) || 0) : 0;
+    const salesAmt = editingItem.work_type === '販売' ? (Number(editingItem.sales_amount) || 0) : 0;
+    const finalProposal = editingItem.proposal_content === 'その他' ? editingItem.proposal_detail : editingItem.proposal_content;
 
     const payload = {
       ...editingItem,
       action: 'update',
-      技術料: techFee,
-      修理金額: repairAmt,
-      販売金額: salesAmt,
-      提案内容: finalProposal,
+      tech_fee: techFee,
+      repair_amount: repairAmt,
+      sales_amount: salesAmt,
+      proposal_content: finalProposal,
     };
 
     try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-      await fetch(GAS_URL, {
+      const res = await fetch(GAS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formBody,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
+      
+      const result = await res.json();
+      if (!res.ok || result.error || result.success === false) {
+        throw new Error(result.error || "更新に失敗しました。");
+      }
+
       setEditingItem(null);
       await fetchData();
     } catch (error) {
-      setSubmitMessage("通信エラーが発生しました。");
+      const errorMessage = error instanceof Error ? error.message : "不明なエラー";
+      setSubmitMessage(`通信エラー: ${errorMessage}`);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
+
+    const payload = {
+      action: 'delete',
+      id: itemToDelete.id
+    };
+
+    try {
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await res.json();
+      if (!res.ok || result.error || result.success === false) {
+        throw new Error(result.error || "削除に失敗しました");
+      }
+
+      setItemToDelete(null);
+      await fetchData();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "不明なエラー";
+      alert(`削除中にエラーが発生しました:\n${errorMessage}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -280,7 +321,6 @@ function HistoryList() {
           </div>
         </div>
 
-        {/* 検索・絞り込みエリア */}
         <div className="bg-white rounded-[14px] p-3 shadow-sm flex flex-col gap-3 border border-gray-100">
           <div className="flex justify-between items-center">
             <span className="text-sm font-bold text-gray-500 ml-1">表示月を選択</span>
@@ -338,7 +378,6 @@ function HistoryList() {
         </div>
       </div>
 
-      {/* サマリーカード */}
       <div className="w-[92%] max-w-md bg-white rounded-[16px] shadow-[0_2px_10px_rgba(0,0,0,0.04)] p-4 mb-4">
         <div className="flex justify-between items-center mb-3 border-b border-gray-100 pb-2">
           <div className="text-gray-500 font-bold text-sm">📅 {selectedMonth === "all" ? "全期間" : selectedMonthDisplay} の実績</div>
@@ -360,7 +399,6 @@ function HistoryList() {
         </div>
       </div>
 
-      {/* リストエリア */}
       <div className="w-[92%] max-w-md flex flex-col gap-3">
         {isLoading ? (
           <div className="text-center py-10 text-gray-400 font-bold text-sm animate-pulse">データを読み込んでいます...</div>
@@ -376,9 +414,9 @@ function HistoryList() {
             const dayItems = groupedData[dateStr];
             const isDateExpanded = expandedDate === dateStr;
             
-            const dayTech = dayItems.reduce((s, i) => s + (Number(i.技術料) || 0), 0);
-            const dayRepair = dayItems.reduce((s, i) => s + (Number(i.修理金額) || 0), 0);
-            const daySales = dayItems.reduce((s, i) => s + (Number(i.販売金額) || 0), 0);
+            const dayTech = dayItems.reduce((s, i) => s + (Number(i.tech_fee) || 0), 0);
+            const dayRepair = dayItems.reduce((s, i) => s + (Number(i.repair_amount) || 0), 0);
+            const daySales = dayItems.reduce((s, i) => s + (Number(i.sales_amount) || 0), 0);
 
             return (
               <div key={dateStr} className="bg-white rounded-[16px] shadow-sm border border-gray-100 overflow-hidden">
@@ -412,11 +450,10 @@ function HistoryList() {
                     {dayItems.map((item, index) => {
                       const itemKey = `${dateStr}-${index}`;
                       const isItemExpanded = expandedItemKey === itemKey;
-                      const isContracted = item.メモ && item.メモ.includes('成約');
-                      const isHighway = item.遠隔高速利用 === '有';
-                      const isProposal = item.提案有無 === '有';
+                      const isContracted = item.memo && item.memo.includes('成約');
+                      const isHighway = item.remote_highway_fee === '有';
+                      const isProposal = item.proposal_exists === '有';
 
-                      // グラデーションの出し分け
                       let wrapperClass = "p-0 bg-transparent";
                       if (isContracted && isProposal) {
                         wrapperClass = "p-[2.5px] bg-gradient-to-br from-red-400 via-yellow-300 via-green-400 via-blue-400 to-purple-500 shadow-[0_0_15px_rgba(234,170,67,0.4)]";
@@ -444,7 +481,7 @@ function HistoryList() {
 
                             <div className="flex justify-between items-center relative z-10">
                               <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${isHighway ? 'bg-white/60 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
-                                {formatTimeForDisplay(item.開始時間)} - {formatTimeForDisplay(item.終了時間)}
+                                {formatTimeForDisplay(item.start_time)} - {formatTimeForDisplay(item.end_time)}
                               </span>
                               <div className="text-gray-400">
                                 {isItemExpanded ? (
@@ -457,22 +494,22 @@ function HistoryList() {
 
                             <div className="relative z-10">
                               <div className="text-[13px] font-black text-gray-800 truncate flex items-center gap-1.5">
-                                {item.クライアント && item.クライアント !== '(-----)' && (
+                                {item.client && item.client !== '(-----)' && (
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                                    ["リビング", "ハウス"].includes(item.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
-                                    ["トータルサービス", "タカギ"].includes(item.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
-                                    ["崎山不動産", "ひだまり"].includes(item.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
-                                    item.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                                    ["リビング", "ハウス"].includes(item.client) ? "bg-green-100 text-green-700 border-green-200" :
+                                    ["トータルサービス", "タカギ"].includes(item.client) ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                    ["崎山不動産", "ひだまり"].includes(item.client) ? "bg-purple-100 text-purple-700 border-purple-200" :
+                                    item.client === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
                                     "bg-gray-100 text-gray-500 border-gray-200"
                                   }`}>
-                                    {item.クライアント}
+                                    {item.client}
                                   </span>
                                 )}
-                                {item.訪問先}
-                                {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.担当者}</span>}
+                                {item.destination}
+                                {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.assignee}</span>}
                               </div>
                               <div className={`text-[10px] truncate font-bold mt-0.5 ${isHighway ? 'text-blue-600/80' : 'text-gray-400'}`}>
-                                {item.エリア} / {item.品目} / {item.作業内容}
+                                {item.area} / {item.item} / {item.work_content}
                               </div>
                             </div>
 
@@ -480,13 +517,13 @@ function HistoryList() {
                               <div className="flex gap-1.5 flex-wrap">
                                 {isContracted && <span className="bg-gradient-to-r from-red-500 to-purple-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm">成約</span>}
                                 {isProposal && <span className="bg-[#eaaa43] text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-[#d4932d]">提案あり</span>}
-                                {isProposal && item.提案内容 && <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-orange-200">提案品: {item.提案内容}</span>}
-                                {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">高速: {item.伝票番号}</span>}
+                                {isProposal && item.proposal_content && <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-orange-200">提案品: {item.proposal_content}</span>}
+                                {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">高速: {item.slip_number}</span>}
                               </div>
                               <div className="flex gap-2.5 text-[11px] font-black">
-                                <span className="text-gray-600">技:¥{Number(item.技術料).toLocaleString()}</span>
-                                {item.作業区分 === '修理' && <span className={isHighway ? 'text-blue-700' : 'text-[#547b97]'}>修:¥{Number(item.修理金額).toLocaleString()}</span>}
-                                {item.作業区分 === '販売' && <span className={isHighway ? 'text-pink-600' : 'text-[#d98c77]'}>販:¥{Number(item.販売金額).toLocaleString()}</span>}
+                                <span className="text-gray-600">技:¥{Number(item.tech_fee).toLocaleString()}</span>
+                                {item.work_type === '修理' && <span className={isHighway ? 'text-blue-700' : 'text-[#547b97]'}>修:¥{Number(item.repair_amount).toLocaleString()}</span>}
+                                {item.work_type === '販売' && <span className={isHighway ? 'text-pink-600' : 'text-[#d98c77]'}>販:¥{Number(item.sales_amount).toLocaleString()}</span>}
                               </div>
                             </div>
 
@@ -494,26 +531,37 @@ function HistoryList() {
                               <div className={`mt-3 pt-3 border-t ${isHighway ? 'border-blue-200' : 'border-gray-100'} text-[11px] space-y-2 animate-fade-in relative z-10 cursor-default`} onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-between">
                                   <span className="text-gray-500 font-bold">依頼内容</span>
-                                  <span className="font-black text-gray-700">{item.依頼内容}</span>
+                                  <span className="font-black text-gray-700">{item.request_content}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-500 font-bold">状況</span>
-                                  <span className={`font-black px-2 py-0.5 rounded ${item.状況 === '完了' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{item.状況}</span>
+                                  <span className={`font-black px-2 py-0.5 rounded ${item.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{item.status}</span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-500 font-bold">提案</span>
-                                  <span className="font-black text-gray-700">{item.提案有無} {item.提案内容 ? `(${item.提案内容})` : ''}</span>
+                                  <span className="font-black text-gray-700">{item.proposal_exists} {item.proposal_content ? `(${item.proposal_content})` : ''}</span>
                                 </div>
-                                {item.メモ && (
+                                {item.memo && (
                                   <div>
                                     <span className="text-gray-500 font-bold block mb-1">メモ</span>
                                     <div className={`p-2.5 rounded-lg ${isHighway ? 'bg-white/60' : 'bg-gray-50'} text-gray-700 font-medium whitespace-pre-wrap leading-relaxed`}>
-                                      {item.メモ}
+                                      {item.memo}
                                     </div>
                                   </div>
                                 )}
 
-                                <div className="pt-2 flex justify-end">
+                                <div className="pt-2 flex justify-between items-center">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setItemToDelete(item);
+                                    }}
+                                    className="flex items-center gap-1 px-3 py-2 rounded-lg font-bold text-xs text-red-500 hover:bg-red-50 active:scale-95 transition-all"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    削除
+                                  </button>
+
                                   <button 
                                     onClick={(e) => openEditModal(e, item)}
                                     className={`flex items-center gap-1 px-4 py-2 rounded-lg font-bold text-xs shadow-sm active:scale-95 transition-transform ${isHighway ? 'bg-blue-600 text-white border-none' : 'bg-white border border-gray-200 text-gray-600'}`}
@@ -535,6 +583,28 @@ function HistoryList() {
           })
         )}
       </div>
+
+      {itemToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[120] flex items-center justify-center p-4 animate-fade-in" onClick={() => setItemToDelete(null)}>
+          <div className="bg-white rounded-[24px] w-full max-w-sm p-6 flex flex-col items-center text-center shadow-2xl transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+              </svg>
+            </div>
+            <h3 className="text-lg font-black text-gray-800 mb-2">この案件を削除しますか？</h3>
+            <p className="text-xs text-gray-500 font-medium mb-2 bg-gray-50 p-3 rounded-xl w-full border border-gray-100">
+              {itemToDelete.destination}<br/>
+              {itemToDelete.item} / {itemToDelete.request_content}
+            </p>
+            <p className="text-[10px] text-red-500 font-bold mb-6">※この操作は取り消せません。スプレッドシートからも完全に削除されます。</p>
+            <div className="w-full flex gap-3">
+              <button onClick={() => setItemToDelete(null)} className="flex-1 bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold active:scale-95 transition-transform">キャンセル</button>
+              <button onClick={handleDeleteSubmit} disabled={isDeleting} className="flex-1 bg-red-500 text-white py-3.5 rounded-xl font-bold tracking-widest active:scale-95 transition-transform shadow-md disabled:bg-gray-300">{isDeleting ? '削除中...' : '削除する'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingItem && (
         <div className="fixed inset-0 bg-[#f8f6f0] z-[100] overflow-y-auto pb-32 flex flex-col items-center">
@@ -565,11 +635,11 @@ function HistoryList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>日付</label>
-                    <input type="date" name="日付" value={editingItem.日付} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="date" name="date" value={editingItem.date} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>担当者</label>
-                    <select name="担当者" value={editingItem.担当者} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="assignee" value={editingItem.assignee} onChange={handleEditChange} required className={inputBaseClass}>
                       {assignees.map(a => <option key={a} value={a}>{a}</option>)}
                     </select>
                   </div>
@@ -577,11 +647,11 @@ function HistoryList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>開始時間</label>
-                    <input type="time" name="開始時間" value={editingItem.開始時間} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="time" name="start_time" value={editingItem.start_time} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div>
                     <label className={labelClass}>終了時間</label>
-                    <input type="time" name="終了時間" value={editingItem.終了時間} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="time" name="end_time" value={editingItem.end_time} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                 </div>
               </div>
@@ -596,26 +666,25 @@ function HistoryList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>訪問先名</label>
-                    <input type="text" name="訪問先" value={editingItem.訪問先} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="text" name="destination" value={editingItem.destination} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>クライアント</label>
-                    <select name="クライアント" value={editingItem.クライアント} onChange={handleEditChange} className={inputBaseClass}>
+                    <select name="client" value={editingItem.client} onChange={handleEditChange} className={inputBaseClass}>
                       <option value="">(-----)</option>
                       {clients.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className={selectWrapperClass}>
+                  <div>
                     <label className={labelClass}>エリア</label>
-                    <select name="エリア" value={editingItem.エリア} onChange={handleEditChange} required className={inputBaseClass}>
-                      {areas.map(a => <option key={a} value={a}>{a}</option>)}
-                    </select>
+                    <input type="text" name="area" value={editingItem.area} onChange={handleEditChange} required placeholder="例: 鹿児島市" className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>品目</label>
-                    <select name="品目" value={editingItem.品目} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="item" value={editingItem.item} onChange={handleEditChange} required className={inputBaseClass}>
+                      <option value="">(選択)</option>
                       {items.map(i => <option key={i} value={i}>{i}</option>)}
                     </select>
                   </div>
@@ -623,13 +692,15 @@ function HistoryList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>依頼内容</label>
-                    <select name="依頼内容" value={editingItem.依頼内容} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="request_content" value={editingItem.request_content} onChange={handleEditChange} required className={inputBaseClass}>
+                      <option value="">(選択)</option>
                       {requestContents.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>作業内容</label>
-                    <select name="作業内容" value={editingItem.作業内容} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="work_content" value={editingItem.work_content} onChange={handleEditChange} required className={inputBaseClass}>
+                      <option value="">(選択)</option>
                       {workContents.map(w => <option key={w} value={w}>{w}</option>)}
                     </select>
                   </div>
@@ -646,8 +717,8 @@ function HistoryList() {
                 <div>
                   <label className={labelClass}>作業区分</label>
                   <div className="flex bg-gray-100 p-1 rounded-xl">
-                    <button type="button" onClick={() => handleEditToggle('作業区分', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.作業区分 === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
-                    <button type="button" onClick={() => handleEditToggle('作業区分', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.作業区分 === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
+                    <button type="button" onClick={() => handleEditToggle('work_type', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.work_type === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
+                    <button type="button" onClick={() => handleEditToggle('work_type', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.work_type === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -655,15 +726,15 @@ function HistoryList() {
                     <label className={labelClass}>技術料</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">¥</span>
-                      <input type="number" name="技術料" value={editingItem.技術料} onChange={handleEditChange} required className={`${inputBaseClass} pl-8`} />
+                      <input type="number" name="tech_fee" value={editingItem.tech_fee} onChange={handleEditChange} required className={`${inputBaseClass} pl-8`} />
                     </div>
                   </div>
-                  {editingItem.作業区分 === '修理' ? (
+                  {editingItem.work_type === '修理' ? (
                     <div>
                       <label className={`${labelClass} text-[#547b97]`}>修理金額</label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#547b97] font-bold">¥</span>
-                        <input type="number" name="修理金額" value={editingItem.修理金額} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
+                        <input type="number" name="repair_amount" value={editingItem.repair_amount} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
                       </div>
                     </div>
                   ) : (
@@ -671,7 +742,7 @@ function HistoryList() {
                       <label className={`${labelClass} text-[#d98c77]`}>販売金額</label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#d98c77] font-bold">¥</span>
-                        <input type="number" name="販売金額" value={editingItem.販売金額} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
+                        <input type="number" name="sales_amount" value={editingItem.sales_amount} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
                       </div>
                     </div>
                   )}
@@ -689,24 +760,31 @@ function HistoryList() {
                   <div>
                     <label className={labelClass}>提案有無</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => { handleEditToggle('提案有無', '無'); setEditingItem(p => ({...p, 提案内容: '', 提案内容詳細: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.提案有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleEditToggle('提案有無', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.提案有無 === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => { handleEditToggle('proposal_exists', '無'); setEditingItem(p => ({...p, proposal_content: '', proposal_detail: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.proposal_exists === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditToggle('proposal_exists', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.proposal_exists === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
-                  {editingItem.提案有無 === '有' && (
-                    <div className={selectWrapperClass}>
-                      <label className={labelClass}>提案内容</label>
-                      <select name="提案内容" value={editingItem.提案内容} onChange={handleEditChange} required className={inputBaseClass}>
-                        <option value="">選択してください</option>
-                        {proposalContents.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
+                  <div>
+                    <label className={labelClass}>成約有無</label>
+                    <div className="flex bg-gray-100 p-1 rounded-xl">
+                      <button type="button" onClick={() => handleEditSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.is_contracted === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.is_contracted === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
-                  )}
+                  </div>
                 </div>
-                {editingItem.提案有無 === '有' && editingItem.提案内容 === 'その他' && (
+                {editingItem.proposal_exists === '有' && (
+                  <div className={selectWrapperClass}>
+                    <label className={labelClass}>提案内容</label>
+                    <select name="proposal_content" value={editingItem.proposal_content} onChange={handleEditChange} required className={inputBaseClass}>
+                      <option value="">選択してください</option>
+                      {proposalContents.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                )}
+                {editingItem.proposal_exists === '有' && editingItem.proposal_content === 'その他' && (
                   <div>
                     <label className={labelClass}>提案内容（詳細）</label>
-                    <input type="text" name="提案内容詳細" value={editingItem.提案内容詳細} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="text" name="proposal_detail" value={editingItem.proposal_detail} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                 )}
               </div>
@@ -721,27 +799,27 @@ function HistoryList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>状況</label>
-                    <select name="状況" value={editingItem.状況} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="status" value={editingItem.status} onChange={handleEditChange} required className={inputBaseClass}>
                       {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className={labelClass}>遠隔・高速利用</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => { handleEditToggle('遠隔高速利用', '無'); setEditingItem(p => ({...p, 伝票番号: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleEditToggle('遠隔高速利用', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '有' ? 'bg-white text-blue-500 shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => { handleEditToggle('remote_highway_fee', '無'); setEditingItem(p => ({...p, slip_number: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.remote_highway_fee === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditToggle('remote_highway_fee', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.remote_highway_fee === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
                 </div>
-                {editingItem.遠隔高速利用 === '有' && (
+                {editingItem.remote_highway_fee === '有' && (
                   <div>
                     <label className={labelClass}>伝票番号</label>
-                    <input type="text" name="伝票番号" value={editingItem.伝票番号} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="text" name="slip_number" value={editingItem.slip_number} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                 )}
                 <div>
                   <label className={labelClass}>メモ</label>
-                  <textarea name="メモ" value={editingItem.メモ} onChange={handleEditChange} rows={3} className={`${inputBaseClass} resize-none`}></textarea>
+                  <textarea name="memo" value={editingItem.memo} onChange={handleEditChange} rows={4} className={`${inputBaseClass} resize-none`} placeholder="特記事項を入力"></textarea>
                 </div>
               </div>
             </div>
@@ -753,16 +831,27 @@ function HistoryList() {
         </div>
       )}
 
-    </div>
-  );
-}
-
-export default function Page(props: any) {
-  return (
-    <div className="min-h-screen bg-[#f8f6f0] font-sans text-slate-800 pb-32">
-      <Suspense fallback={<div className="flex justify-center items-center h-screen text-gray-500 font-bold">画面を読み込んでいます...</div>}>
-        <HistoryList />
-      </Suspense>
+      {itemToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-[120] flex items-center justify-center p-4 animate-fade-in" onClick={() => setItemToDelete(null)}>
+          <div className="bg-white rounded-[24px] w-full max-w-sm p-6 flex flex-col items-center text-center shadow-2xl transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+              </svg>
+            </div>
+            <h3 className="text-lg font-black text-gray-800 mb-2">この案件を削除しますか？</h3>
+            <p className="text-xs text-gray-500 font-medium mb-2 bg-gray-50 p-3 rounded-xl w-full border border-gray-100">
+              {itemToDelete.destination}<br/>
+              {itemToDelete.item} / {itemToDelete.request_content}
+            </p>
+            <p className="text-[10px] text-red-500 font-bold mb-6">※この操作は取り消せません。</p>
+            <div className="w-full flex gap-3">
+              <button onClick={() => setItemToDelete(null)} className="flex-1 bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold active:scale-95 transition-transform">キャンセル</button>
+              <button onClick={handleDeleteSubmit} disabled={isDeleting} className="flex-1 bg-red-500 text-white py-3.5 rounded-xl font-bold active:scale-95 transition-transform shadow-md disabled:bg-gray-300">{isDeleting ? '削除中...' : '削除する'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- ホームへ戻る専用ボタン --- */}
       <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
@@ -773,6 +862,17 @@ export default function Page(props: any) {
           <span className="font-black text-[15px] tracking-[0.2em] pt-0.5">ホームに戻る</span>
         </Link>
       </div>
+
+    </div>
+  );
+}
+
+export default function HistoryPage() {
+  return (
+    <div className="min-h-screen bg-[#f8f6f0] font-sans text-slate-800 pb-32">
+      <Suspense fallback={<div className="flex justify-center items-center h-screen text-gray-500 font-bold">画面を読み込んでいます...</div>}>
+        <HistoryList />
+      </Suspense>
     </div>
   );
 }

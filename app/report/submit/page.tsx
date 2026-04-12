@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
+const GAS_URL = '/api/gas';
 
 const extractDateForInput = (dateStr: string) => {
   if (!dateStr) return "";
@@ -33,17 +33,11 @@ function getTodayString() {
 function extractTime(timeStr: string) {
   if (!timeStr) return "99:99"; 
   
-  // 既に「09:30」のような形式で来ていればそのまま返す
   if (/^\d{1,2}:\d{2}$/.test(timeStr)) return timeStr;
 
   try {
-    // "1899-12-29T15:03:00.000Z" のようなUTC日時文字列をDateオブジェクトにする
     const d = new Date(timeStr);
-    
-    // 有効な日付データとして認識された場合
     if (!isNaN(d.getTime())) {
-      // getHours(), getMinutes() は、スマホ（ブラウザ）のタイムゾーン（日本）に合わせて
-      // 自動的にUTCから+9時間された現地の「時・分」を返してくれます。
       const hours = String(d.getHours()).padStart(2, '0');
       const minutes = String(d.getMinutes()).padStart(2, '0');
       return `${hours}:${minutes}`;
@@ -83,7 +77,7 @@ function SubmitReportContent() {
         const res = await fetch(`${GAS_URL}?worker=${encodeURIComponent(worker)}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
-        setAllReports(data);
+        setAllReports(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("日報データの取得に失敗しました", error);
       } finally {
@@ -100,20 +94,19 @@ function SubmitReportContent() {
     setTargetDate(toDateString(newD));
   };
 
-  const displayedReports = allReports.filter((r: any) => extractDateForInput(r.日付) === targetDate);
+  const displayedReports = allReports.filter((r: any) => extractDateForInput(r.date) === targetDate);
 
   let totalTechFee = 0;
   let totalAmount = 0;
 
   displayedReports.forEach(r => {
-    totalTechFee += Number(r.技術料) || 0;
-    totalAmount += (Number(r.修理金額) || 0) + (Number(r.販売金額) || 0);
+    totalTechFee += Number(r.tech_fee) || 0;
+    totalAmount += (Number(r.repair_amount) || 0) + (Number(r.sales_amount) || 0);
   });
 
-  // ★ 修正された日本時間（+9時間）を使って、正しく時系列順に並び替える
   const sortedReports = [...displayedReports].sort((a, b) => {
-    const timeA = extractTime(a.開始時間);
-    const timeB = extractTime(b.開始時間);
+    const timeA = extractTime(a.start_time);
+    const timeB = extractTime(b.start_time);
     return timeA.localeCompare(timeB);
   });
 
@@ -227,8 +220,8 @@ function SubmitReportContent() {
 
         {/* データ一覧 */}
         {sortedReports.map((r, index) => {
-          const isSeiyaku = r.メモ ? r.メモ.includes('成約') : false; 
-          const isRemote = r.遠隔高速利用 === '有';
+          const isSeiyaku = r.memo ? r.memo.includes('成約') : false; 
+          const isRemote = r.remote_highway_fee === '有';
 
           const wrapperClass = isSeiyaku 
             ? "bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 p-[1.5px] shadow-sm"
@@ -238,37 +231,37 @@ function SubmitReportContent() {
 
           const innerClass = (isSeiyaku || isRemote) ? "bg-white rounded-[4px]" : "bg-transparent";
 
-          const seiyakuProductText = isSeiyaku && r.メモ ? r.メモ.replace(/【成約】\n?/g, '').trim() : '';
+          const seiyakuProductText = isSeiyaku && r.memo ? r.memo.replace(/【成約】\n?/g, '').trim() : '';
 
           return (
             <div key={index} className={`mb-[3px] rounded-[6px] ${wrapperClass}`}>
               <div className={`flex items-start py-1 px-1 ${innerClass}`}>
                 
                 <div className="w-[38px] text-[10px] text-gray-500 text-center font-bold leading-[1.1] pt-0.5 shrink-0">
-                  {formatDisplayTime(r.開始時間)}<br/>
-                  <span className="text-gray-400 text-[8px]">{formatDisplayTime(r.終了時間)}</span>
+                  {formatDisplayTime(r.start_time)}<br/>
+                  <span className="text-gray-400 text-[8px]">{formatDisplayTime(r.end_time)}</span>
                 </div>
                 
                 <div className="flex-1 pl-1.5 pr-1 overflow-hidden">
                   <div className="flex items-center gap-1.5 mb-[2px] overflow-hidden">
-                    {r.クライアント && r.クライアント !== '(-----)' && r.クライアント !== '-' && (
+                    {r.client && r.client !== '(-----)' && r.client !== '-' && (
                       <span className={`text-[7.5px] px-1 py-[1.5px] rounded border shrink-0 ${
-                        ["リビング", "ハウス"].includes(r.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
-                        ["トータルサービス", "タカギ"].includes(r.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
-                        ["崎山不動産", "ひだまり"].includes(r.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
-                        r.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                        ["リビング", "ハウス"].includes(r.client) ? "bg-green-100 text-green-700 border-green-200" :
+                        ["トータルサービス", "タカギ"].includes(r.client) ? "bg-blue-100 text-blue-700 border-blue-200" :
+                        ["崎山不動産", "ひだまり"].includes(r.client) ? "bg-purple-100 text-purple-700 border-purple-200" :
+                        r.client === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
                         "bg-gray-100 text-gray-500 border-gray-200"
                       }`}>
-                        {r.クライアント}
+                        {r.client}
                       </span>
                     )}
-                    <span className="text-[11px] font-black text-gray-800 truncate leading-none pt-0.5">{r.訪問先}</span>
+                    <span className="text-[11px] font-black text-gray-800 truncate leading-none pt-0.5">{r.destination}</span>
                     <span className="text-[7.5px] text-gray-400 font-bold border border-gray-200 rounded px-1 leading-none py-[2px] whitespace-nowrap bg-gray-50">
-                      {r.エリア?.replace('エリア', '') || ''}
+                      {r.area?.replace('エリア', '') || ''}
                     </span>
                   </div>
                   <div className="text-[8.5px] text-gray-500 truncate leading-none mb-1">
-                    {r.品目} {r.品番 ? `(${r.品番})` : ''} / {r.依頼内容}
+                    {r.item} {r.part_number ? `(${r.part_number})` : ''} / {r.request_content}
                   </div>
                   
                   {/* バッジエリア */}
@@ -290,18 +283,18 @@ function SubmitReportContent() {
                         遠隔
                       </span>
                     )}
-                    {isRemote && r.伝票番号 && (
+                    {isRemote && r.slip_number && (
                       <span className="text-[7.5px] text-red-500 font-bold border border-red-200 bg-red-50 px-1 py-[1px] rounded-[2px] leading-none shadow-sm shrink-0">
-                        伝: {r.伝票番号}
+                        伝: {r.slip_number}
                       </span>
                     )}
                   </div>
                 </div>
                 
                 <div className="w-[50px] text-right flex flex-col justify-center pr-1 pt-0.5 shrink-0">
-                  <div className="text-[8px] text-gray-400 font-bold leading-[1.1] mb-[1px]">¥{Number(r.技術料).toLocaleString()}</div>
-                  <div className={`text-[10px] font-black leading-[1.1] ${r.作業区分 === '販売' ? 'text-[#d98c77]' : 'text-[#547b97]'}`}>
-                    ¥{(Number(r.修理金額) + Number(r.販売金額)).toLocaleString()}
+                  <div className="text-[8px] text-gray-400 font-bold leading-[1.1] mb-[1px]">¥{Number(r.tech_fee).toLocaleString()}</div>
+                  <div className={`text-[10px] font-black leading-[1.1] ${r.work_type === '販売' ? 'text-[#d98c77]' : 'text-[#547b97]'}`}>
+                    ¥{(Number(r.repair_amount) + Number(r.sales_amount)).toLocaleString()}
                   </div>
                 </div>
 

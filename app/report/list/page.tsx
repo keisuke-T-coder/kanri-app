@@ -4,11 +4,10 @@ import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
+const GAS_URL = '/api/gas';
 
 // --- 各種選択肢（編集画面用） ---
-const assignees = ["佐藤", "田中", "南", "新田", "德重"];
-const areas = ["市内南部エリア", "市街地エリア", "市内北部エリア", "日置エリア", "北薩エリア", "南薩エリア", "大隅エリア", "鹿屋エリア", "姶良エリア", "霧島エリア", "その他"];
+const assignees = ["佐藤", "田中", "南", "新田", "德重", "前田"];
 const clients = ["リビング", "ハウス", "ひだまり", "タカギ", "トータルサービス", "崎山不動産", "LTS"];
 const items = ["トイレ", "キッチン", "洗面", "浴室", "ドア", "窓サッシ", "水栓", "エクステリア", "照明換気設備", "内装設備", "外装設備"];
 const requestContents = ["水漏れ", "作動不良", "開閉不良", "破損", "異音", "詰り関係", "その他"];
@@ -72,18 +71,28 @@ function ReportList() {
     try {
       setIsLoading(true);
       setExpandedIndex(null);
-      const res = await fetch(`${GAS_URL}?type=today&worker=${encodeURIComponent(currentWorker)}`);
+
+      // 今日（当日）の日付を取得
+      const now = new Date();
+      const targetDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      const res = await fetch(`${GAS_URL}?type=today&worker=${encodeURIComponent(currentWorker)}&date=${targetDate}`, { cache: 'no-store' });
       if (!res.ok) throw new Error("通信エラー");
       const json = await res.json();
+      if (json && json.success === false) {
+        throw new Error(json.error || "通信エラー");
+      }
       
-      const sortedData = json.sort((a: any, b: any) => {
-        if (!a.開始時間 || !b.開始時間) return 0;
-        return a.開始時間 > b.開始時間 ? 1 : -1;
+      const dataArray = Array.isArray(json) ? json : [];
+      const sortedData = dataArray.sort((a: any, b: any) => {
+        if (!a.start_time || !b.start_time) return 0;
+        return String(a.start_time) > String(b.start_time) ? 1 : -1;
       });
       
       setData(sortedData);
     } catch (err) {
-      setError("データの取得に失敗しました。");
+      const msg = err instanceof Error ? err.message : "データの取得に失敗しました。";
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -97,28 +106,27 @@ function ReportList() {
     e.stopPropagation();
     let isOtherProposal = false;
     let proposalDetail = "";
-    if (item.提案有無 === '有' && item.提案内容 && !proposalContents.includes(item.提案内容)) {
+    if (item.proposal_exists === '有' && item.proposal_content && !proposalContents.includes(item.proposal_content)) {
       isOtherProposal = true;
-      proposalDetail = item.提案内容;
+      proposalDetail = item.proposal_content;
     }
 
     setEditingItem({
       ...item,
-      日付: extractDateForInput(item.日付),
-      開始時間: extractTimeForInput(item.開始時間),
-      終了時間: extractTimeForInput(item.終了時間),
-      提案内容: isOtherProposal ? 'その他' : (item.提案内容 || ''),
-      提案内容詳細: proposalDetail,
-      成約有無: (item.メモ && item.メモ.includes('【成約】')) ? '有' : '無'
+      date: extractDateForInput(item.date),
+      start_time: extractTimeForInput(item.start_time),
+      end_time: extractTimeForInput(item.end_time),
+      proposal_content: isOtherProposal ? 'その他' : (item.proposal_content || ''),
+      proposal_detail: proposalDetail,
+      is_contracted: (item.memo && item.memo.includes('【成約】')) ? '有' : '無'
     });
     setSubmitMessage("");
   };
 
   const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    // 品目がトイレ以外になったら品番をクリア
-    if (name === '品目' && value !== 'トイレ') {
-      setEditingItem({ ...editingItem, [name]: value, 品番: '' });
+    if (name === 'item' && value !== 'トイレ') {
+      setEditingItem({ ...editingItem, [name]: value, part_number: '' });
     } else {
       setEditingItem({ ...editingItem, [name]: value });
     }
@@ -128,9 +136,8 @@ function ReportList() {
     setEditingItem({ ...editingItem, [name]: value });
   };
 
-  // 成約トグルの処理
   const handleSeiyakuToggle = (value: string) => {
-    let newMemo = editingItem.メモ || "";
+    let newMemo = editingItem.memo || "";
     
     if (value === '有') {
       if (!newMemo.includes('【成約】')) {
@@ -140,58 +147,60 @@ function ReportList() {
       newMemo = newMemo.replace('【成約】\n', '').replace('【成約】', '');
     }
 
-    setEditingItem({ ...editingItem, 成約有無: value, メモ: newMemo });
+    setEditingItem({ ...editingItem, is_contracted: value, memo: newMemo });
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // ★ 追加：成約有無が「有」の時の必須入力ストッパー
-    if (editingItem.成約有無 === '有') {
-      // メモ欄から「【成約】」や「【WB予定】...」「【WB休み】...」のタグ文字だけを取り除く
-      const pureMemo = (editingItem.メモ || "")
+    if (editingItem.is_contracted === '有') {
+      const pureMemo = (editingItem.memo || "")
         .replace(/【成約】/g, '')
         .replace(/【WB(予定|休み)】.*?(?:\n|$)/g, '')
         .trim();
         
-      // タグを除いて文字が残っていなければ（つまり手打ちで追記していなければ）エラー
       if (pureMemo.length === 0) {
         setSubmitMessage("エラー：成約した製品名や詳細をメモ欄に入力してください。");
-        return; // ここで処理をストップ
+        return;
       }
     }
 
     setIsSubmitting(true);
     setSubmitMessage("");
 
-    const techFee = Number(editingItem.技術料) || 0;
-    const repairAmt = editingItem.作業区分 === '修理' ? (Number(editingItem.修理金額) || 0) : 0;
-    const salesAmt = editingItem.作業区分 === '販売' ? (Number(editingItem.販売金額) || 0) : 0;
-    const finalProposal = editingItem.提案内容 === 'その他' ? editingItem.提案内容詳細 : editingItem.提案内容;
+    const techFee = Number(editingItem.tech_fee) || 0;
+    const repairAmt = editingItem.work_type === '修理' ? (Number(editingItem.repair_amount) || 0) : 0;
+    const salesAmt = editingItem.work_type === '販売' ? (Number(editingItem.sales_amount) || 0) : 0;
+    const finalProposal = editingItem.proposal_content === 'その他' ? editingItem.proposal_detail : editingItem.proposal_content;
 
     const payload = {
       ...editingItem,
       action: 'update',
-      技術料: techFee,
-      修理金額: repairAmt,
-      販売金額: salesAmt,
-      提案内容: finalProposal,
+      tech_fee: techFee,
+      repair_amount: repairAmt,
+      sales_amount: salesAmt,
+      proposal_content: finalProposal,
     };
 
     try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-
-      await fetch(GAS_URL, {
+      const res = await fetch(GAS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formBody,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
+
+      const result = await res.json();
+      if (!res.ok || result.error || result.success === false) {
+        throw new Error(result.error || "更新に失敗しました。");
+      }
 
       setEditingItem(null);
       await fetchData();
     } catch (error) {
-      setSubmitMessage("エラー：通信に失敗しました。もう一度お試しください。");
+      const errorMessage = error instanceof Error ? error.message : "不明なエラー";
+      setSubmitMessage(`通信エラー: ${errorMessage}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -202,33 +211,38 @@ function ReportList() {
     setIsDeleting(true);
 
     const payload = {
-      タイムスタンプ: itemToDelete.タイムスタンプ,
-      action: 'delete'
+      action: 'delete',
+      id: itemToDelete.id
     };
 
     try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-
-      await fetch(GAS_URL, {
+      const res = await fetch(GAS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formBody,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
+
+      const result = await res.json();
+      if (!res.ok || result.error || result.success === false) {
+        throw new Error(result.error || "削除に失敗しました");
+      }
 
       setItemToDelete(null);
       await fetchData();
     } catch (error) {
-      alert("削除中にエラーが発生しました。もう一度お試しください。");
+      const errorMessage = error instanceof Error ? error.message : "不明なエラー";
+      alert(`削除中にエラーが発生しました:\n${errorMessage}`);
     } finally {
       setIsDeleting(false);
     }
   };
 
   const totalCount = data.length;
-  const totalTech = data.reduce((sum, item) => sum + (Number(item.技術料) || 0), 0);
-  const totalRepair = data.reduce((sum, item) => sum + (Number(item.修理金額) || 0), 0);
-  const totalSales = data.reduce((sum, item) => sum + (Number(item.販売金額) || 0), 0);
+  const totalTech = data.reduce((sum, item) => sum + (Number(item.tech_fee) || 0), 0);
+  const totalRepair = data.reduce((sum, item) => sum + (Number(item.repair_amount) || 0), 0);
+  const totalSales = data.reduce((sum, item) => sum + (Number(item.sales_amount) || 0), 0);
   const todayStr = new Date().toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
 
   const inputBaseClass = "w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-base text-gray-800 focus:outline-none focus:border-[#eaaa43] focus:ring-1 focus:ring-[#eaaa43] transition-all appearance-none";
@@ -293,8 +307,8 @@ function ReportList() {
           </div>
         ) : (
           data.map((item, index) => {
-            const isContracted = item.メモ && item.メモ.includes('成約');
-            const isHighway = item.遠隔高速利用 === '有';
+            const isContracted = item.memo && item.memo.includes('成約');
+            const isHighway = item.remote_highway_fee === '有';
             const isExpanded = expandedIndex === index;
 
             return (
@@ -315,8 +329,8 @@ function ReportList() {
 
                   <div className="flex justify-between items-center relative z-10">
                     <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${isHighway ? 'bg-white/60 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
-                        {formatTimeForDisplay(item.開始時間)} - {formatTimeForDisplay(item.終了時間)}
+                       <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${isHighway ? 'bg-white/60 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                        {formatTimeForDisplay(item.start_time)} - {formatTimeForDisplay(item.end_time)}
                       </span>
                     </div>
                     <div className="text-gray-400">
@@ -330,34 +344,34 @@ function ReportList() {
 
                   <div className="relative z-10">
                     <div className="text-[13px] font-black text-gray-800 truncate flex items-center gap-1.5">
-                      {item.クライアント && item.クライアント !== '(-----)' && item.クライアント !== '-' && (
+                      {item.client && item.client !== '(-----)' && item.client !== '-' && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                          ["リビング", "ハウス"].includes(item.クライアント) ? "bg-green-100 text-green-700 border-green-200" :
-                          ["トータルサービス", "タカギ"].includes(item.クライアント) ? "bg-blue-100 text-blue-700 border-blue-200" :
-                          ["崎山不動産", "ひだまり"].includes(item.クライアント) ? "bg-purple-100 text-purple-700 border-purple-200" :
-                          item.クライアント === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                          ["リビング", "ハウス"].includes(item.client) ? "bg-green-100 text-green-700 border-green-200" :
+                          ["トータルサービス", "タカギ"].includes(item.client) ? "bg-blue-100 text-blue-700 border-blue-200" :
+                          ["崎山不動産", "ひだまり"].includes(item.client) ? "bg-purple-100 text-purple-700 border-purple-200" :
+                          item.client === "LTS" ? "bg-orange-100 text-orange-700 border-orange-200" :
                           "bg-gray-100 text-gray-500 border-gray-200"
                         }`}>
-                          {item.クライアント}
+                          {item.client}
                         </span>
                       )}
-                      {item.訪問先}
-                      {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.担当者}</span>}
+                      {item.destination}
+                      {currentWorker === "" && <span className="ml-2 text-[10px] text-[#eaaa43] border border-[#eaaa43] px-1 rounded-sm">担: {item.assignee}</span>}
                     </div>
                     <div className={`text-[10px] truncate font-bold mt-0.5 ${isHighway ? 'text-blue-600/80' : 'text-gray-400'}`}>
-                      {item.エリア} / {item.品目} / {item.作業内容}
+                      {item.area} / {item.item} / {item.work_content}
                     </div>
                   </div>
 
                   <div className="flex justify-between items-end mt-1 relative z-10">
                     <div className="flex gap-1.5 flex-wrap">
                       {isContracted && <span className="bg-gradient-to-r from-red-500 to-purple-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm">成約</span>}
-                      {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">遠隔・高速利用: {item.伝票番号}</span>}
+                      {isHighway && <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm border border-blue-400">遠隔・高速利用: {item.slip_number}</span>}
                     </div>
                     <div className="flex gap-2.5 text-[11px] font-black">
-                      <span className="text-gray-600">技:¥{Number(item.技術料).toLocaleString()}</span>
-                      {item.作業区分 === '修理' && <span className={isHighway ? 'text-blue-700' : 'text-[#547b97]'}>修:¥{Number(item.修理金額).toLocaleString()}</span>}
-                      {item.作業区分 === '販売' && <span className={isHighway ? 'text-pink-600' : 'text-[#d98c77]'}>販:¥{Number(item.販売金額).toLocaleString()}</span>}
+                      <span className="text-gray-600">技:¥{Number(item.tech_fee).toLocaleString()}</span>
+                      {item.work_type === '修理' && <span className={isHighway ? 'text-blue-700' : 'text-[#547b97]'}>修:¥{Number(item.repair_amount).toLocaleString()}</span>}
+                      {item.work_type === '販売' && <span className={isHighway ? 'text-pink-600' : 'text-[#d98c77]'}>販:¥{Number(item.sales_amount).toLocaleString()}</span>}
                     </div>
                   </div>
 
@@ -365,21 +379,21 @@ function ReportList() {
                     <div className={`mt-3 pt-3 border-t ${isHighway ? 'border-blue-200' : 'border-gray-100'} text-[11px] space-y-2 animate-fade-in relative z-10 cursor-default`} onClick={e => e.stopPropagation()}>
                       <div className="flex justify-between">
                         <span className="text-gray-500 font-bold">依頼内容</span>
-                        <span className="font-black text-gray-700">{item.依頼内容}</span>
+                        <span className="font-black text-gray-700">{item.request_content}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500 font-bold">状況</span>
-                        <span className={`font-black px-2 py-0.5 rounded ${item.状況 === '完了' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{item.状況}</span>
+                        <span className={`font-black px-2 py-0.5 rounded ${item.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{item.status}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500 font-bold">提案</span>
-                        <span className="font-black text-gray-700">{item.提案有無} {item.提案内容 ? `(${item.提案内容})` : ''}</span>
+                        <span className="font-black text-gray-700">{item.proposal_exists} {item.proposal_content ? `(${item.proposal_content})` : ''}</span>
                       </div>
-                      {item.メモ && (
+                      {item.memo && (
                         <div>
                           <span className="text-gray-500 font-bold block mb-1">メモ</span>
                           <div className={`p-2.5 rounded-lg ${isHighway ? 'bg-white/60' : 'bg-gray-50'} text-gray-700 font-medium whitespace-pre-wrap leading-relaxed`}>
-                            {item.メモ}
+                            {item.memo}
                           </div>
                         </div>
                       )}
@@ -425,8 +439,8 @@ function ReportList() {
             </div>
             <h3 className="text-lg font-black text-gray-800 mb-2">この案件を削除しますか？</h3>
             <p className="text-xs text-gray-500 font-medium mb-2 bg-gray-50 p-3 rounded-xl w-full border border-gray-100">
-              {itemToDelete.訪問先}<br/>
-              {itemToDelete.品目} / {itemToDelete.依頼内容}
+              {itemToDelete.destination}<br/>
+              {itemToDelete.item} / {itemToDelete.request_content}
             </p>
             <p className="text-[10px] text-red-500 font-bold mb-6">※この操作は取り消せません。スプレッドシートからも完全に削除されます。</p>
             <div className="w-full flex gap-3">
@@ -450,7 +464,6 @@ function ReportList() {
             </div>
           </div>
 
-          {/* ★ バリデーションエラー等のメッセージ表示枠 */}
           {submitMessage && (
             <div className={`w-[92%] max-w-md mb-4 p-4 rounded-xl text-center text-sm font-bold shadow-sm ${submitMessage.includes('エラー') ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-[#eaaa43] border border-[#eaaa43]'}`}>
               {submitMessage}
@@ -468,11 +481,11 @@ function ReportList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>日付</label>
-                    <input type="date" name="日付" value={editingItem.日付} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="date" name="date" value={editingItem.date} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>担当者</label>
-                    <select name="担当者" value={editingItem.担当者} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="assignee" value={editingItem.assignee} onChange={handleEditChange} required className={inputBaseClass}>
                       {assignees.map(a => <option key={a} value={a}>{a}</option>)}
                     </select>
                   </div>
@@ -480,11 +493,11 @@ function ReportList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>開始時間</label>
-                    <input type="time" name="開始時間" value={editingItem.開始時間} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="time" name="start_time" value={editingItem.start_time} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div>
                     <label className={labelClass}>終了時間</label>
-                    <input type="time" name="終了時間" value={editingItem.終了時間} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="time" name="end_time" value={editingItem.end_time} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                 </div>
               </div>
@@ -500,57 +513,49 @@ function ReportList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>訪問先名</label>
-                    <input type="text" name="訪問先" value={editingItem.訪問先} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="text" name="destination" value={editingItem.destination} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>クライアント</label>
-                    <select name="クライアント" value={editingItem.クライアント} onChange={handleEditChange} className={inputBaseClass}>
+                    <select name="client" value={editingItem.client} onChange={handleEditChange} className={inputBaseClass}>
                       <option value="">(-----)</option>
-                      <option value="(-----)">(-----)</option>
                       {clients.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className={selectWrapperClass}>
+                  <div>
                     <label className={labelClass}>エリア</label>
-                    <select name="エリア" value={editingItem.エリア} onChange={handleEditChange} required className={inputBaseClass}>
-                      <option value="">(選択)</option>
-                      <option value="(-----)">(-----)</option>
-                      {areas.map(a => <option key={a} value={a}>{a}</option>)}
-                    </select>
+                    <input type="text" name="area" value={editingItem.area} onChange={handleEditChange} required placeholder="例: 鹿児島市" className={inputBaseClass} />
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>品目</label>
-                    <select name="品目" value={editingItem.品目} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="item" value={editingItem.item} onChange={handleEditChange} required className={inputBaseClass}>
                       <option value="">(選択)</option>
-                      <option value="(-----)">(-----)</option>
                       {items.map(i => <option key={i} value={i}>{i}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {editingItem.品目 === 'トイレ' && (
+                {editingItem.item === 'トイレ' && (
                   <div className="animate-fade-in bg-orange-50/50 p-3 rounded-xl border border-orange-100">
                     <label className={`${labelClass} text-orange-600`}>品番（※トイレ選択時）</label>
-                    <input type="text" name="品番" value={editingItem.品番 || ''} onChange={handleEditChange} placeholder="例: DT-1234" className={`${inputBaseClass} bg-white`} />
+                    <input type="text" name="part_number" value={editingItem.part_number || ''} onChange={handleEditChange} placeholder="例: DT-1234" className={`${inputBaseClass} bg-white`} />
                   </div>
                 )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>依頼内容</label>
-                    <select name="依頼内容" value={editingItem.依頼内容} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="request_content" value={editingItem.request_content} onChange={handleEditChange} required className={inputBaseClass}>
                       <option value="">(選択)</option>
-                      <option value="(-----)">(-----)</option>
                       {requestContents.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>作業内容</label>
-                    <select name="作業内容" value={editingItem.作業内容} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="work_content" value={editingItem.work_content} onChange={handleEditChange} required className={inputBaseClass}>
                       <option value="">(選択)</option>
-                      <option value="(-----)">(-----)</option>
                       {workContents.map(w => <option key={w} value={w}>{w}</option>)}
                     </select>
                   </div>
@@ -568,8 +573,8 @@ function ReportList() {
                 <div>
                   <label className={labelClass}>作業区分</label>
                   <div className="flex bg-gray-100 p-1 rounded-xl">
-                    <button type="button" onClick={() => handleEditToggle('作業区分', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.作業区分 === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
-                    <button type="button" onClick={() => handleEditToggle('作業区分', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.作業区分 === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
+                    <button type="button" onClick={() => handleEditToggle('work_type', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.work_type === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
+                    <button type="button" onClick={() => handleEditToggle('work_type', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.work_type === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -577,15 +582,15 @@ function ReportList() {
                     <label className={labelClass}>技術料</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">¥</span>
-                      <input type="number" name="技術料" value={editingItem.技術料} onChange={handleEditChange} required className={`${inputBaseClass} pl-8`} />
+                      <input type="number" name="tech_fee" value={editingItem.tech_fee} onChange={handleEditChange} required className={`${inputBaseClass} pl-8`} />
                     </div>
                   </div>
-                  {editingItem.作業区分 === '修理' ? (
+                  {editingItem.work_type === '修理' ? (
                     <div>
                       <label className={`${labelClass} text-[#547b97]`}>修理金額</label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#547b97] font-bold">¥</span>
-                        <input type="number" name="修理金額" value={editingItem.修理金額} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
+                        <input type="number" name="repair_amount" value={editingItem.repair_amount} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
                       </div>
                     </div>
                   ) : (
@@ -593,7 +598,7 @@ function ReportList() {
                       <label className={`${labelClass} text-[#d98c77]`}>販売金額</label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#d98c77] font-bold">¥</span>
-                        <input type="number" name="販売金額" value={editingItem.販売金額} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
+                        <input type="number" name="sales_amount" value={editingItem.sales_amount} onChange={handleEditChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
                       </div>
                     </div>
                   )}
@@ -612,24 +617,24 @@ function ReportList() {
                   <div>
                     <label className={labelClass}>提案有無</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => { handleEditToggle('提案有無', '無'); setEditingItem(p => ({...p, 提案内容: '', 提案内容詳細: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.提案有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleEditToggle('提案有無', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.提案有無 === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => { handleEditToggle('proposal_exists', '無'); setEditingItem(p => ({...p, proposal_content: '', proposal_detail: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.proposal_exists === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditToggle('proposal_exists', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.proposal_exists === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
-                  {editingItem.提案有無 === '有' && (
+                  {editingItem.proposal_exists === '有' && (
                     <div className={selectWrapperClass}>
                       <label className={labelClass}>提案内容</label>
-                      <select name="提案内容" value={editingItem.提案内容} onChange={handleEditChange} required className={inputBaseClass}>
+                      <select name="proposal_content" value={editingItem.proposal_content} onChange={handleEditChange} required className={inputBaseClass}>
                         <option value="">選択してください</option>
                         {proposalContents.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
                   )}
                 </div>
-                {editingItem.提案有無 === '有' && editingItem.提案内容 === 'その他' && (
+                {editingItem.proposal_exists === '有' && editingItem.proposal_content === 'その他' && (
                   <div>
                     <label className={labelClass}>提案内容（詳細）</label>
-                    <input type="text" name="提案内容詳細" value={editingItem.提案内容詳細} onChange={handleEditChange} required className={inputBaseClass} />
+                    <input type="text" name="proposal_detail" value={editingItem.proposal_detail} onChange={handleEditChange} required className={inputBaseClass} />
                   </div>
                 )}
               </div>
@@ -646,15 +651,15 @@ function ReportList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className={selectWrapperClass}>
                     <label className={labelClass}>状況</label>
-                    <select name="状況" value={editingItem.状況} onChange={handleEditChange} required className={inputBaseClass}>
+                    <select name="status" value={editingItem.status} onChange={handleEditChange} required className={inputBaseClass}>
                       {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className={labelClass}>成約有無</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => handleSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.成約有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.成約有無 === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => handleSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.is_contracted === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.is_contracted === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
                 </div>
@@ -663,14 +668,14 @@ function ReportList() {
                   <div>
                     <label className={labelClass}>遠隔・高速利用</label>
                     <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button type="button" onClick={() => { handleEditToggle('遠隔高速利用', '無'); setEditingItem(p => ({...p, 伝票番号: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                      <button type="button" onClick={() => handleEditToggle('遠隔高速利用', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.遠隔高速利用 === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
+                      <button type="button" onClick={() => { handleEditToggle('remote_highway_fee', '無'); setEditingItem(p => ({...p, slip_number: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.remote_highway_fee === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                      <button type="button" onClick={() => handleEditToggle('remote_highway_fee', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${editingItem.remote_highway_fee === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                     </div>
                   </div>
-                  {editingItem.遠隔高速利用 === '有' && (
+                  {editingItem.remote_highway_fee === '有' && (
                     <div className="animate-fade-in">
                       <label className={labelClass}>伝票番号</label>
-                      <input type="text" name="伝票番号" value={editingItem.伝票番号} onChange={handleEditChange} required className={inputBaseClass} />
+                      <input type="text" name="slip_number" value={editingItem.slip_number} onChange={handleEditChange} required className={inputBaseClass} />
                     </div>
                   )}
                 </div>
@@ -678,17 +683,17 @@ function ReportList() {
                 <div>
                   <div className="flex justify-between items-end mb-1.5 ml-1">
                     <label className="text-xs font-bold text-gray-600 block">メモ</label>
-                    {editingItem.成約有無 === '有' && (
+                    {editingItem.is_contracted === '有' && (
                       <span className="text-[10px] font-bold text-red-500 animate-pulse">※成約した製品名を入力してください</span>
                     )}
                   </div>
                   <textarea 
-                    name="メモ" 
-                    value={editingItem.メモ} 
+                    name="memo" 
+                    value={editingItem.memo} 
                     onChange={handleEditChange} 
                     rows={4} 
-                    className={`${inputBaseClass} resize-none ${editingItem.成約有無 === '有' ? 'border-pink-200 bg-pink-50/30' : ''}`} 
-                    placeholder={editingItem.成約有無 === '有' ? "例：【成約】DT-1234 を販売しました。" : "特記事項があれば入力してください"}
+                    className={`${inputBaseClass} resize-none ${editingItem.is_contracted === '有' ? 'border-pink-200 bg-pink-50/30' : ''}`} 
+                    placeholder={editingItem.is_contracted === '有' ? "例：【成約】DT-1234 を販売しました。" : "特記事項があれば入力してください"}
                   ></textarea>
                 </div>
               </div>
@@ -701,6 +706,15 @@ function ReportList() {
         </div>
       )}
 
+      {/* --- ホームへ戻る専用ボタン --- */}
+      <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
+        <Link href="/" className="pointer-events-auto bg-white/90 backdrop-blur-lg border border-orange-100/50 px-10 py-3.5 rounded-[22px] shadow-[0_10px_40px_rgba(0,0,0,0.08)] flex items-center gap-3 group active:scale-95 transition-all text-[#eaaa43]">
+          <div className="w-8 h-8 bg-orange-50 rounded-full flex items-center justify-center group-hover:bg-[#eaaa43] group-hover:text-white transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+          </div>
+          <span className="font-black text-[15px] tracking-[0.2em] pt-0.5">ホームに戻る</span>
+        </Link>
+      </div>
     </div>
   );
 }
@@ -711,16 +725,6 @@ export default function ReportListPage() {
       <Suspense fallback={<div className="flex justify-center items-center h-screen text-gray-500 font-bold">画面を読み込んでいます...</div>}>
         <ReportList />
       </Suspense>
-
-      {/* --- ホームへ戻る専用ボタン --- */}
-      <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
-        <Link href="/" className="pointer-events-auto bg-white/90 backdrop-blur-lg border border-orange-100/50 px-10 py-3.5 rounded-[22px] shadow-[0_10px_40px_rgba(0,0,0,0.08)] flex items-center gap-3 group active:scale-95 transition-all text-[#eaaa43]">
-          <div className="w-8 h-8 bg-orange-50 rounded-full flex items-center justify-center group-hover:bg-[#eaaa43] group-hover:text-white transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
-          </div>
-          <span className="font-black text-[15px] tracking-[0.2em] pt-0.5">ホームに戻る</span>
-        </Link>
-      </div>
     </div>
   );
 }

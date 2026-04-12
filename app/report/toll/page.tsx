@@ -4,9 +4,9 @@ import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
+const GAS_URL = '/api/gas';
 
-const assignees = ["佐藤", "田中", "南", "新田", "德重"];
+const assignees = ["佐藤", "田中", "南", "新田", "德重", "前田"];
 
 // 時間・日付の整形関数
 const formatTimeForDisplay = (timeStr: string) => {
@@ -52,10 +52,11 @@ function TollList() {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
+      // 詳細フィルタリングは後ほどクライアントサイドで行うため、一旦全データを取得（worker指定なし）
       const res = await fetch(`${GAS_URL}?worker=${encodeURIComponent(currentWorker)}`);
       if (!res.ok) throw new Error("通信エラー");
       const json = await res.json();
-      setAllData(json);
+      setAllData(Array.isArray(json) ? json : []);
     } catch (err) {
       setError("データの取得に失敗しました。");
     } finally {
@@ -67,34 +68,34 @@ function TollList() {
     fetchData();
   }, [fetchData]);
 
-  // A-4特有のデータ抽出と並び替え
+  // 高速・遠隔データの抽出と並び替え (英語キーに対応)
   const filteredData = allData.filter(item => {
-    if (item.遠隔高速利用 !== '有') return false; 
-    if (!item.日付) return false;
+    if (item.remote_highway_fee !== '有') return false; 
+    if (!item.date) return false;
     
-    const cleanDate = extractDateForInput(item.日付);
+    const cleanDate = extractDateForInput(item.date);
     if (!cleanDate) return false;
     
     const itemMonth = cleanDate.substring(0, 7);
     return itemMonth === selectedMonth;
   }).sort((a, b) => {
-    // 「全員」が選ばれている時は、まず担当者名で並び替える（グループ化）
-    if (currentWorker === "" || currentWorker === "add") {
-      const workerA = a.担当者 || "";
-      const workerB = b.担当者 || "";
+    // 担当者名で並び替え（グループ化）
+    if (currentWorker === "") {
+      const workerA = a.assignee || "";
+      const workerB = b.assignee || "";
       if (workerA !== workerB) {
         return workerA.localeCompare(workerB, 'ja');
       }
     }
 
     // 次に新しい日付が上に来るようにソート
-    const dateA = new Date(a.日付).getTime();
-    const dateB = new Date(b.日付).getTime();
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
     if (dateA !== dateB) return dateB - dateA;
     
     // 同じ日付・担当者なら時間が早い順に並べる
-    if (!a.開始時間 || !b.開始時間) return 0;
-    return a.開始時間 > b.開始時間 ? 1 : -1; 
+    if (!a.start_time || !b.start_time) return 0;
+    return a.start_time > b.start_time ? 1 : -1; 
   });
 
   const totalCount = filteredData.length;
@@ -106,9 +107,8 @@ function TollList() {
       {/* 画面上部エリア（ブルー基調で統一） */}
       <div className="w-[92%] max-w-md mt-6 mb-4">
         
-        {/* ヘッダー（右上のバッジをなくし、タイトルを強調） */}
+        {/* ヘッダー */}
         <div className="bg-[#1e40af] rounded-[14px] py-4 px-4 shadow-md flex items-center justify-between mb-4 relative overflow-hidden">
-          {/* 透かしアイコン */}
           <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
             <svg width="80" height="80" viewBox="0 0 24 24" fill="white">
               <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.08 3.11H5.77L6.85 7zM7.5 16c-.83 0-1.5-.67-1.5-1.5S6.67 13 7.5 13s1.5.67 1.5 1.5S8.33 16 7.5 16zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
@@ -120,14 +120,14 @@ function TollList() {
             <span className="text-sm tracking-wider">戻る</span>
           </Link>
           <h1 className="text-white font-bold tracking-widest text-[17px] flex-1 text-center relative z-10 whitespace-nowrap">高速・遠隔地チェック</h1>
-          <div className="w-16"></div> {/* 右側はあえて空ける */}
+          <div className="w-16"></div>
         </div>
 
-        {/* ★ A-4特別仕様：横スクロールでワンタップ切り替えできる担当者タブ */}
+        {/* 担当者タブ */}
         <div className="flex gap-2.5 overflow-x-auto pb-3 w-full snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <button 
             onClick={() => setCurrentWorker("")} 
-            className={`snap-start shrink-0 px-5 py-2 rounded-full text-[13px] font-bold transition-all border ${currentWorker === "" || currentWorker === "add" ? "bg-[#1e40af] text-white border-[#1e40af] shadow-md scale-105" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+            className={`snap-start shrink-0 px-5 py-2 rounded-full text-[13px] font-bold transition-all border ${currentWorker === "" ? "bg-[#1e40af] text-white border-[#1e40af] shadow-md scale-105" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
           >
             全員まとめ
           </button>
@@ -162,7 +162,7 @@ function TollList() {
         </div>
       </div>
 
-      {/* 伝票リスト（フラットリスト形式で一気に見せる） */}
+      {/* 伝票リスト */}
       <div className="w-[92%] max-w-md flex flex-col gap-3">
         {isLoading ? (
           <div className="text-center py-10 text-blue-400 font-bold text-sm animate-pulse">利用データを検索中...</div>
@@ -177,47 +177,41 @@ function TollList() {
           filteredData.map((item, index) => (
             <div key={index} className="bg-white rounded-[14px] shadow-sm border border-blue-50 overflow-hidden flex flex-col">
               
-              {/* 上部：日付・時間・担当者 */}
               <div className="bg-blue-50/50 p-2.5 px-4 border-b border-blue-100/50 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-black text-blue-900">{getShortDateString(item.日付)}</span>
-                  <span className="text-[11px] font-bold text-blue-700/70">{formatTimeForDisplay(item.開始時間)}</span>
+                  <span className="text-[13px] font-black text-blue-900">{getShortDateString(item.date)}</span>
+                  <span className="text-[11px] font-bold text-blue-700/70">{formatTimeForDisplay(item.start_time)}</span>
                 </div>
                 <div className="text-[11px] font-bold bg-white text-blue-800 px-2.5 py-0.5 rounded shadow-sm border border-blue-100">
-                  担: {item.担当者}
+                  担: {item.assignee}
                 </div>
               </div>
 
-              {/* 下部：伝票番号と訪問先 */}
               <div className="p-4 flex flex-col gap-3 relative">
-                
                 <div className="flex items-start justify-between gap-2 z-10">
                   <div className="flex-1">
                     <p className="text-[10px] text-gray-400 font-bold mb-0.5">訪問先</p>
                     <p className="text-sm font-black text-gray-800 leading-snug">
-                      {item.クライアント && item.クライアント !== '(-----)' ? <span className="text-[10px] text-gray-500 mr-1 bg-gray-100 px-1.5 py-0.5 rounded">{item.クライアント}</span> : ''}
-                      {item.訪問先}
+                      {item.client && item.client !== '(-----)' ? <span className="text-[10px] text-gray-500 mr-1 bg-gray-100 px-1.5 py-0.5 rounded">{item.client}</span> : ''}
+                      {item.destination}
                     </p>
-                    <p className="text-[10px] text-gray-500 font-medium mt-1">{item.エリア} / {item.作業内容}</p>
+                    <p className="text-[10px] text-gray-500 font-medium mt-1">{item.area} / {item.work_content}</p>
                   </div>
                   
-                  {/* 最も重要な「伝票番号」を右側に大きく配置 */}
                   <div className="text-right">
                     <p className="text-[10px] text-blue-500 font-bold mb-0.5">伝票番号</p>
                     <div className="bg-blue-600 text-white font-black text-lg px-3 py-1.5 rounded-lg shadow-md tracking-wider min-w-[80px] text-center">
-                      {item.伝票番号 || '未入力'}
+                      {item.slip_number || '未入力'}
                     </div>
                   </div>
                 </div>
-
               </div>
             </div>
           ))
         )}
       </div>
 
-      {/* 画面下のタブバー */}
-      {/* --- ホームへ戻る専用ボタン --- */}
+      {/* ホームへ戻るボタン */}
       <div className="fixed bottom-0 left-0 right-0 w-full p-6 flex justify-center z-40 mb-2 pointer-events-none">
         <Link href="/" className="pointer-events-auto bg-white/90 backdrop-blur-lg border border-orange-100/50 px-10 py-3.5 rounded-[22px] shadow-[0_10px_40px_rgba(0,0,0,0.08)] flex items-center gap-3 group active:scale-95 transition-all text-[#eaaa43]">
           <div className="w-8 h-8 bg-orange-50 rounded-full flex items-center justify-center group-hover:bg-[#eaaa43] group-hover:text-white transition-colors">
@@ -230,7 +224,7 @@ function TollList() {
   );
 }
 
-export default function Page(props: any) {
+export default function Page() {
   return (
     <div className="min-h-screen bg-[#f8f6f0] font-sans text-slate-800 pb-32">
       <Suspense fallback={<div className="flex justify-center items-center h-screen text-blue-500 font-bold">画面を読み込んでいます...</div>}>

@@ -4,11 +4,9 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyi3gbullz4u0EqXBkhMVxiqfZq0-PKdhim9QVrSyl1q4SvBaS46GX5lzsyZrAu5j8u2A/exec';
-
-const assignees = ["佐藤", "田中", "南", "新田", "德重"];
-const areas = ["市内南部エリア", "市街地エリア", "市内北部エリア", "日置エリア", "北薩エリア", "南薩エリア", "大隅エリア", "鹿屋エリア", "姶良エリア", "霧島エリア", "その他"];
-const clients = ["リビング", "ハウス", "ひだまり", "タカギ", "トータルサービス", "崎山不動産", "ひだまり", "LTS"];
+const GAS_URL = '/api/gas';
+const assignees = ["佐藤", "田中", "南", "新田", "德重", "前田"];
+const clients = ["リビング", "ハウス", "ひだまり", "タカギ", "トータルサービス", "崎山不動産", "LTS"];
 const items = ["トイレ", "キッチン", "洗面", "浴室", "ドア", "窓サッシ", "水栓", "エクステリア", "照明換気設備", "内装設備", "外装設備"];
 const requestContents = ["水漏れ", "作動不良", "開閉不良", "破損", "異音", "詰り関係", "その他"];
 const workContents = ["部品交換", "製品交換、取付", "清掃", "点検", "見積", "応急処置", "その他"];
@@ -29,29 +27,29 @@ function ReportForm() {
   const defaultWorker = searchParams.get('worker') || ""; 
 
   const [formData, setFormData] = useState({
-    日付: getTodayString(),
-    開始時間: '',
-    終了時間: '',
-    担当者: defaultWorker,
-    訪問先: '',
-    エリア: '',
-    クライアント: '',
-    品目: '',
-    品番: '',
-    依頼内容: '',
-    作業内容: '',
-    作業区分: '修理',
-    技術料: '0',
-    修理金額: '0',
-    販売金額: '0',
-    提案有無: '無',
-    提案内容: '',
-    提案内容詳細: '',
-    遠隔高速利用: '無',
-    伝票番号: '',
-    状況: '完了',
-    メモ: '',
-    成約有無: '無'
+    date: getTodayString(),
+    start_time: '',
+    end_time: '',
+    assignee: defaultWorker,
+    destination: '',
+    area: '',
+    client: '',
+    item: '',
+    part_number: '',
+    request_content: '',
+    work_content: '',
+    work_type: '修理',
+    tech_fee: '0',
+    repair_amount: '0',
+    sales_amount: '0',
+    proposal_exists: '無',
+    proposal_content: '',
+    proposal_detail: '',
+    remote_highway_fee: '無',
+    slip_number: '',
+    status: '完了',
+    memo: '',
+    is_contracted: '無'
   });
 
   const [showConfirm, setShowConfirm] = useState(false);
@@ -68,16 +66,16 @@ function ReportForm() {
       let endMinutes = minutes;
       
       const endTime = `${String(endHours).padStart(2, '0')}:${String(endMinutes).padStart(2, '0')}`;
-      setFormData({ ...formData, 開始時間: startTime, 終了時間: endTime });
+      setFormData({ ...formData, start_time: startTime, end_time: endTime });
     } else {
-      setFormData({ ...formData, 開始時間: startTime });
+      setFormData({ ...formData, start_time: startTime });
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    if (name === '品目' && value !== 'トイレ') {
-      setFormData({ ...formData, [name]: value, 品番: '' });
+    if (name === 'item' && value !== 'トイレ') {
+      setFormData({ ...formData, [name]: value, part_number: '' });
     } else {
       setFormData({ ...formData, [name]: value });
     }
@@ -88,7 +86,7 @@ function ReportForm() {
   };
 
   const handleSeiyakuToggle = (value: string) => {
-    let newMemo = formData.メモ;
+    let newMemo = formData.memo;
     
     if (value === '有') {
       if (!newMemo.includes('【成約】')) {
@@ -98,7 +96,7 @@ function ReportForm() {
       newMemo = newMemo.replace('【成約】\n', '').replace('【成約】', '');
     }
 
-    setFormData({ ...formData, 成約有無: value, メモ: newMemo });
+    setFormData({ ...formData, is_contracted: value, memo: newMemo });
   };
 
   const handleOpenConfirm = (e: React.FormEvent) => {
@@ -110,73 +108,72 @@ function ReportForm() {
     setIsSubmitting(true);
     setSubmitMessage("");
 
-    const techFee = Number(formData.技術料) || 0;
-    const repairAmt = formData.作業区分 === '修理' ? (Number(formData.修理金額) || 0) : 0;
-    const salesAmt = formData.作業区分 === '販売' ? (Number(formData.販売金額) || 0) : 0;
-    const finalProposal = formData.提案内容 === 'その他' ? formData.提案内容詳細 : formData.提案内容;
+    const techFee = Number(formData.tech_fee) || 0;
+    const repairAmt = formData.work_type === '修理' ? (Number(formData.repair_amount) || 0) : 0;
+    const salesAmt = formData.work_type === '販売' ? (Number(formData.sales_amount) || 0) : 0;
+    const finalProposal = formData.proposal_content === 'その他' ? formData.proposal_detail : formData.proposal_content;
 
     const payload = {
-      日付: formData.日付,
-      開始時間: formData.開始時間,
-      終了時間: formData.終了時間,
-      担当者: formData.担当者,
-      訪問先: formData.訪問先,
-      エリア: formData.エリア,
-      クライアント: formData.クライアント,
-      品目: formData.品目,
-      品番: formData.品目 === 'トイレ' ? formData.品番 : '',
-      依頼内容: formData.依頼内容,
-      作業内容: formData.作業内容,
-      作業区分: formData.作業区分,
-      技術料: techFee,
-      修理金額: repairAmt,
-      販売金額: salesAmt,
-      提案有無: formData.提案有無,
-      提案内容: finalProposal,
-      遠隔高速利用: formData.遠隔高速利用,
-      伝票番号: formData.伝票番号,
-      状況: formData.状況,
-      メモ: formData.メモ
+      action: 'create',
+      date: formData.date,
+      start_time: formData.start_time,
+      end_time: formData.end_time,
+      assignee: formData.assignee,
+      destination: formData.destination,
+      area: formData.area,
+      client: formData.client,
+      item: formData.item,
+      part_number: formData.item === 'トイレ' ? formData.part_number : '',
+      request_content: formData.request_content,
+      work_content: formData.work_content,
+      work_type: formData.work_type,
+      tech_fee: techFee,
+      repair_amount: repairAmt,
+      sales_amount: salesAmt,
+      proposal_exists: formData.proposal_exists,
+      proposal_content: finalProposal,
+      remote_highway_fee: formData.remote_highway_fee,
+      slip_number: formData.slip_number,
+      status: formData.status,
+      memo: formData.memo
     };
 
     try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', JSON.stringify(payload));
-
-      await fetch(GAS_URL, {
+      const res = await fetch(GAS_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: formBody,
+        body: JSON.stringify(payload),
       });
+
+      if (!res.ok) throw new Error("保存に失敗しました。通信状況を確認してください。");
 
       setShowConfirm(false);
       setShowSuccessModal(true);
       
       setFormData({
         ...formData,
-        開始時間: '',
-        終了時間: '',
-        訪問先: '',
-        エリア: '',
-        クライアント: '',
-        品目: '',
-        品番: '',
-        依頼内容: '',
-        作業内容: '',
-        技術料: '0',
-        修理金額: '0',
-        販売金額: '0',
-        提案有無: '無',
-        提案内容: '',
-        提案内容詳細: '',
-        遠隔高速利用: '無',
-        伝票番号: '',
-        メモ: '',
-        成約有無: '無'
+        start_time: '',
+        end_time: '',
+        destination: '',
+        area: '',
+        client: '',
+        item: 'その他',
+        part_number: '',
+        request_content: '',
+        work_content: '',
+        tech_fee: '0',
+        repair_amount: '0',
+        sales_amount: '0',
+        proposal_exists: '無',
+        proposal_content: '',
+        proposal_detail: '',
+        remote_highway_fee: '無',
+        slip_number: '',
+        memo: '',
+        is_contracted: '無'
       });
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "不明なエラー";
       setSubmitMessage(`通信エラー: ${errorMessage}`);
@@ -206,7 +203,7 @@ function ReportForm() {
           <h1 className="text-white font-bold tracking-widest text-lg flex-1 text-center">新規入力</h1>
           <div className="w-16 flex justify-end">
             <div className="bg-white/20 px-3 py-1 rounded-full border border-white/30 text-white text-xs font-bold shadow-inner whitespace-nowrap">
-              {formData.担当者 || "未選択"}
+              {formData.assignee || "未選択"}
             </div>
           </div>
         </div>
@@ -230,11 +227,11 @@ function ReportForm() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>日付</label>
-                <input type="date" name="日付" value={formData.日付} onChange={handleChange} required className={inputBaseClass} />
+                <input type="date" name="date" value={formData.date} onChange={handleChange} required className={inputBaseClass} />
               </div>
               <div className={selectWrapperClass}>
                 <label className={labelClass}>担当者</label>
-                <select name="担当者" value={formData.担当者} onChange={handleChange} required className={inputBaseClass}>
+                <select name="assignee" value={formData.assignee} onChange={handleChange} required className={inputBaseClass}>
                   <option value="">(選択)</option>
                   {assignees.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
@@ -243,11 +240,11 @@ function ReportForm() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>開始時間</label>
-                <input type="time" name="開始時間" value={formData.開始時間} onChange={handleStartTimeChange} required className={inputBaseClass} />
+                <input type="time" name="start_time" value={formData.start_time} onChange={handleStartTimeChange} required className={inputBaseClass} />
               </div>
               <div>
                 <label className={labelClass}>終了時間</label>
-                <input type="time" name="終了時間" value={formData.終了時間} onChange={handleChange} required className={inputBaseClass} />
+                <input type="time" name="end_time" value={formData.end_time} onChange={handleChange} required className={inputBaseClass} />
               </div>
             </div>
           </div>
@@ -263,51 +260,48 @@ function ReportForm() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>訪問先名</label>
-                <input type="text" name="訪問先" value={formData.訪問先} onChange={handleChange} placeholder="入力して下さい。" required className={inputBaseClass} />
+                <input type="text" name="destination" value={formData.destination} onChange={handleChange} placeholder="入力して下さい。" required className={inputBaseClass} />
               </div>
               <div className={selectWrapperClass}>
                 <label className={labelClass}>クライアント</label>
-                <select name="クライアント" value={formData.クライアント} onChange={handleChange} className={inputBaseClass}>
+                <select name="client" value={formData.client} onChange={handleChange} className={inputBaseClass}>
                   <option value="">(-----)</option>
                   {clients.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className={selectWrapperClass}>
+              <div>
                 <label className={labelClass}>エリア</label>
-                <select name="エリア" value={formData.エリア} onChange={handleChange} required className={inputBaseClass}>
-                  <option value="">(選択)</option>
-                  {areas.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
+                <input type="text" name="area" value={formData.area} onChange={handleChange} required placeholder="例: 鹿児島市" className={inputBaseClass} />
               </div>
               <div className={selectWrapperClass}>
                 <label className={labelClass}>品目</label>
-                <select name="品目" value={formData.品目} onChange={handleChange} required className={inputBaseClass}>
+                <select name="item" value={formData.item} onChange={handleChange} required className={inputBaseClass}>
                   <option value="">(選択)</option>
                   {items.map(i => <option key={i} value={i}>{i}</option>)}
                 </select>
               </div>
             </div>
             
-            {formData.品目 === 'トイレ' && (
+            {formData.item === 'トイレ' && (
               <div className="animate-fade-in bg-orange-50/50 p-3 rounded-xl border border-orange-100">
                 <label className={`${labelClass} text-orange-600`}>品番（※トイレ選択時）</label>
-                <input type="text" name="品番" value={formData.品番} onChange={handleChange} placeholder="例: DT-1234" className={`${inputBaseClass} bg-white`} />
+                <input type="text" name="part_number" value={formData.part_number} onChange={handleChange} placeholder="例: DT-1234" className={`${inputBaseClass} bg-white`} />
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className={selectWrapperClass}>
                 <label className={labelClass}>依頼内容</label>
-                <select name="依頼内容" value={formData.依頼内容} onChange={handleChange} required className={inputBaseClass}>
+                <select name="request_content" value={formData.request_content} onChange={handleChange} required className={inputBaseClass}>
                   <option value="">(選択)</option>
                   {requestContents.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div className={selectWrapperClass}>
                 <label className={labelClass}>作業内容</label>
-                <select name="作業内容" value={formData.作業内容} onChange={handleChange} required className={inputBaseClass}>
+                <select name="work_content" value={formData.work_content} onChange={handleChange} required className={inputBaseClass}>
                   <option value="">(選択)</option>
                   {workContents.map(w => <option key={w} value={w}>{w}</option>)}
                 </select>
@@ -326,8 +320,8 @@ function ReportForm() {
             <div>
               <label className={labelClass}>作業区分</label>
               <div className="flex bg-gray-100 p-1 rounded-xl">
-                <button type="button" onClick={() => handleToggle('作業区分', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.作業区分 === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
-                <button type="button" onClick={() => handleToggle('作業区分', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.作業区分 === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
+                <button type="button" onClick={() => handleToggle('work_type', '修理')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.work_type === '修理' ? 'bg-white text-[#547b97] shadow-sm' : 'text-gray-400'}`}>修理</button>
+                <button type="button" onClick={() => handleToggle('work_type', '販売')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.work_type === '販売' ? 'bg-white text-[#d98c77] shadow-sm' : 'text-gray-400'}`}>販売</button>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -335,15 +329,15 @@ function ReportForm() {
                 <label className={labelClass}>技術料</label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">¥</span>
-                  <input type="number" name="技術料" value={formData.技術料} onChange={handleChange} required className={`${inputBaseClass} pl-8`} />
+                  <input type="number" name="tech_fee" value={formData.tech_fee} onChange={handleChange} required className={`${inputBaseClass} pl-8`} />
                 </div>
               </div>
-              {formData.作業区分 === '修理' ? (
+              {formData.work_type === '修理' ? (
                 <div>
                   <label className={`${labelClass} text-[#547b97]`}>修理金額</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#547b97] font-bold">¥</span>
-                    <input type="number" name="修理金額" value={formData.修理金額} onChange={handleChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
+                    <input type="number" name="repair_amount" value={formData.repair_amount} onChange={handleChange} required className={`${inputBaseClass} pl-8 border-[#547b97]/30 text-[#547b97] bg-[#547b97]/5`} />
                   </div>
                 </div>
               ) : (
@@ -351,7 +345,7 @@ function ReportForm() {
                   <label className={`${labelClass} text-[#d98c77]`}>販売金額</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#d98c77] font-bold">¥</span>
-                    <input type="number" name="販売金額" value={formData.販売金額} onChange={handleChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
+                    <input type="number" name="sales_amount" value={formData.sales_amount} onChange={handleChange} required className={`${inputBaseClass} pl-8 border-[#d98c77]/30 text-[#d98c77] bg-[#d98c77]/5`} />
                   </div>
                 </div>
               )}
@@ -370,24 +364,31 @@ function ReportForm() {
               <div>
                 <label className={labelClass}>提案有無</label>
                 <div className="flex bg-gray-100 p-1 rounded-xl">
-                  <button type="button" onClick={() => { handleToggle('提案有無', '無'); setFormData(p => ({...p, 提案内容: '', 提案内容詳細: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.提案有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                  <button type="button" onClick={() => handleToggle('提案有無', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.提案有無 === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
+                  <button type="button" onClick={() => { handleToggle('proposal_exists', '無'); setFormData(p => ({...p, proposal_content: '', proposal_detail: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.proposal_exists === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                  <button type="button" onClick={() => handleToggle('proposal_exists', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.proposal_exists === '有' ? 'bg-white text-[#eaaa43] shadow-sm' : 'text-gray-400'}`}>有</button>
                 </div>
               </div>
-              {formData.提案有無 === '有' && (
-                <div className={selectWrapperClass}>
-                  <label className={labelClass}>提案内容</label>
-                  <select name="提案内容" value={formData.提案内容} onChange={handleChange} required className={inputBaseClass}>
-                    <option value="">選択してください</option>
-                    {proposalContents.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
+              <div>
+                <label className={labelClass}>成約有無</label>
+                <div className="flex bg-gray-100 p-1 rounded-xl">
+                  <button type="button" onClick={() => handleSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.is_contracted === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                  <button type="button" onClick={() => handleSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.is_contracted === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                 </div>
-              )}
+              </div>
             </div>
-            {formData.提案有無 === '有' && formData.提案内容 === 'その他' && (
+            {formData.proposal_exists === '有' && (
+              <div className={selectWrapperClass}>
+                <label className={labelClass}>提案内容</label>
+                <select name="proposal_content" value={formData.proposal_content} onChange={handleChange} required className={inputBaseClass}>
+                  <option value="">選択してください</option>
+                  {proposalContents.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            )}
+            {formData.proposal_exists === '有' && formData.proposal_content === 'その他' && (
               <div>
                 <label className={labelClass}>提案内容（詳細）</label>
-                <input type="text" name="提案内容詳細" value={formData.提案内容詳細} onChange={handleChange} placeholder="具体的な提案内容を入力" required className={inputBaseClass} />
+                <input type="text" name="proposal_detail" value={formData.proposal_detail} onChange={handleChange} placeholder="具体的な提案内容を入力" required className={inputBaseClass} />
               </div>
             )}
           </div>
@@ -404,16 +405,9 @@ function ReportForm() {
             <div className="grid grid-cols-2 gap-3">
               <div className={selectWrapperClass}>
                 <label className={labelClass}>状況</label>
-                <select name="状況" value={formData.状況} onChange={handleChange} required className={inputBaseClass}>
+                <select name="status" value={formData.status} onChange={handleChange} required className={inputBaseClass}>
                   {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className={labelClass}>成約有無</label>
-                <div className="flex bg-gray-100 p-1 rounded-xl">
-                  <button type="button" onClick={() => handleSeiyakuToggle('無')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.成約有無 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                  <button type="button" onClick={() => handleSeiyakuToggle('有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.成約有無 === '有' ? 'bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 text-white shadow-sm' : 'text-gray-400'}`}>有</button>
-                </div>
               </div>
             </div>
 
@@ -421,14 +415,14 @@ function ReportForm() {
               <div>
                 <label className={labelClass}>遠隔・高速利用</label>
                 <div className="flex bg-gray-100 p-1 rounded-xl">
-                  <button type="button" onClick={() => { handleToggle('遠隔高速利用', '無'); setFormData(p => ({...p, 伝票番号: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.遠隔高速利用 === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
-                  <button type="button" onClick={() => handleToggle('遠隔高速利用', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.遠隔高速利用 === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
+                  <button type="button" onClick={() => { handleToggle('remote_highway_fee', '無'); setFormData(p => ({...p, slip_number: ''})) }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.remote_highway_fee === '無' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400'}`}>無</button>
+                  <button type="button" onClick={() => handleToggle('remote_highway_fee', '有')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${formData.remote_highway_fee === '有' ? 'bg-[#6495ED] text-white shadow-sm' : 'text-gray-400'}`}>有</button>
                 </div>
               </div>
-              {formData.遠隔高速利用 === '有' && (
+              {formData.remote_highway_fee === '有' && (
                 <div className="animate-fade-in">
                   <label className={labelClass}>伝票番号</label>
-                  <input type="text" name="伝票番号" value={formData.伝票番号} onChange={handleChange} placeholder="例: 12345" required className={inputBaseClass} />
+                  <input type="text" name="slip_number" value={formData.slip_number} onChange={handleChange} placeholder="例: 12345" required className={inputBaseClass} />
                 </div>
               )}
             </div>
@@ -436,17 +430,17 @@ function ReportForm() {
             <div>
               <div className="flex justify-between items-end mb-1.5 ml-1">
                 <label className="text-xs font-bold text-gray-600 block">メモ</label>
-                {formData.成約有無 === '有' && (
+                {formData.is_contracted === '有' && (
                   <span className="text-[10px] font-bold text-red-500 animate-pulse">※成約した製品名を入力してください</span>
                 )}
               </div>
               <textarea 
-                name="メモ" 
-                value={formData.メモ} 
+                name="memo" 
+                value={formData.memo} 
                 onChange={handleChange} 
                 rows={4} 
-                className={`${inputBaseClass} resize-none ${formData.成約有無 === '有' ? 'border-pink-200 bg-pink-50/30' : ''}`} 
-                placeholder={formData.成約有無 === '有' ? "例：【成約】DT-1234 を販売しました。" : "特記事項があれば入力してください"}
+                className={`${inputBaseClass} resize-none ${formData.is_contracted === '有' ? 'border-pink-200 bg-pink-50/30' : ''}`} 
+                placeholder={formData.is_contracted === '有' ? "例：【成約】DT-1234 を販売しました。" : "特記事項があれば入力してください"}
               ></textarea>
             </div>
           </div>
@@ -468,54 +462,54 @@ function ReportForm() {
             <div className="p-6 space-y-4 text-sm font-medium">
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">日付/時間</span>
-                <span className="col-span-2 text-right">{formData.日付} ({formData.開始時間}〜{formData.終了時間})</span>
+                <span className="col-span-2 text-right">{formData.date} ({formData.start_time}〜{formData.end_time})</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">担当者</span>
-                <span className="col-span-2 text-right">{formData.担当者}</span>
+                <span className="col-span-2 text-right">{formData.assignee}</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">訪問先</span>
-                <span className="col-span-2 text-right">{formData.訪問先}</span>
+                <span className="col-span-2 text-right">{formData.destination}</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">エリア</span>
-                <span className="col-span-2 text-right">{formData.エリア}</span>
+                <span className="col-span-2 text-right">{formData.area}</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">クライアント</span>
-                <span className="col-span-2 text-right">{formData.クライアント || 'デフォルト'}</span>
+                <span className="col-span-2 text-right">{formData.client || 'デフォルト'}</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">作業概要</span>
                 <span className="col-span-2 text-right">
-                  {formData.品目} {formData.品目 === 'トイレ' && formData.品番 ? `(品番: ${formData.品番})` : ''} / {formData.依頼内容} / {formData.作業内容}
+                  {formData.item} {formData.item === 'トイレ' && formData.part_number ? `(品番: ${formData.part_number})` : ''} / {formData.request_content} / {formData.work_content}
                 </span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
-                <span className="text-gray-500 text-xs">金額 ({formData.作業区分})</span>
+                <span className="text-gray-500 text-xs">金額 ({formData.work_type})</span>
                 <span className="col-span-2 text-right">
-                  技術: ¥{formData.技術料} <br/>
-                  {formData.作業区分 === '修理' ? `修理: ¥${formData.修理金額}` : `販売: ¥${formData.販売金額}`}
+                  技術: ¥{formData.tech_fee} <br/>
+                  {formData.work_type === '修理' ? `修理: ¥${formData.repair_amount}` : `販売: ¥${formData.sales_amount}`}
                 </span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">提案</span>
-                <span className="col-span-2 text-right">{formData.提案有無} {formData.提案内容 && `(${formData.提案内容 === 'その他' ? formData.提案内容詳細 : formData.提案内容})`}</span>
+                <span className="col-span-2 text-right">{formData.proposal_exists} {formData.proposal_content && `(${formData.proposal_content === 'その他' ? formData.proposal_detail : formData.proposal_content})`}</span>
               </div>
               <div className="grid grid-cols-3 border-b border-gray-200 pb-2">
                 <span className="text-gray-500 text-xs">ステータス等</span>
                 <span className="col-span-2 text-right">
-                  {formData.状況} <br/>
-                  {formData.成約有無 === '有' && <span className="text-[10px] text-white bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 px-1.5 py-0.5 rounded mr-1">成約</span>}
-                  {formData.遠隔高速利用 === '有' && <span className="text-[10px] text-white bg-[#6495ED] px-1.5 py-0.5 rounded mr-1">遠隔</span>}
-                  {formData.遠隔高速利用 === '有' && `(伝: ${formData.伝票番号})`}
+                  {formData.status} <br/>
+                  {formData.is_contracted === '有' && <span className="text-[10px] text-white bg-gradient-to-r from-pink-400 via-yellow-400 to-blue-400 px-1.5 py-0.5 rounded mr-1">成約</span>}
+                  {formData.remote_highway_fee === '有' && <span className="text-[10px] text-white bg-[#6495ED] px-1.5 py-0.5 rounded mr-1">遠隔</span>}
+                  {formData.remote_highway_fee === '有' && `(伝: ${formData.slip_number})`}
                 </span>
               </div>
-              {formData.メモ && (
+              {formData.memo && (
                 <div className="pt-2">
                   <span className="text-gray-500 text-xs block mb-1">メモ</span>
-                  <p className="bg-white p-3 rounded-lg border border-gray-200 text-xs whitespace-pre-wrap">{formData.メモ}</p>
+                  <p className="bg-white p-3 rounded-lg border border-gray-200 text-xs whitespace-pre-wrap">{formData.memo}</p>
                 </div>
               )}
             </div>
@@ -556,7 +550,7 @@ function ReportForm() {
               </button>
               
               <button 
-                onClick={() => router.push(`/report/list?worker=${encodeURIComponent(formData.担当者)}`)} 
+                onClick={() => router.push(`/report/list?worker=${encodeURIComponent(formData.assignee)}`)} 
                 className="w-full bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold tracking-widest active:scale-95 transition-transform"
               >
                 当日一覧（A-2）を確認
@@ -569,7 +563,6 @@ function ReportForm() {
                 メニューへ戻る
               </button>
             </div>
-            
           </div>
         </div>
       )}
