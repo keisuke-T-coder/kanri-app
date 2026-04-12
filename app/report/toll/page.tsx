@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 
 const GAS_URL = '/api/gas';
 
-const assignees = ["佐藤", "田中", "南", "新田", "德重", "前田"];
+const assignees = ["佐藤", "田中", "南", "新田", "徳重", "前田"];
 
 // 時間・日付の整形関数
 const formatTimeForDisplay = (timeStr: string) => {

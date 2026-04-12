@@ -27,7 +27,7 @@ const formatDateForDisplay = (dateStr: string) => {
 };
 
 // 担当者リスト
-const ASSIGNEES = ["佐藤", "田中", "南", "新田", "德重", "前田"];
+const ASSIGNEES = ["佐藤", "田中", "南", "新田", "徳重", "前田"];
 
 // お知らせのデータ型
 type Notice = {
